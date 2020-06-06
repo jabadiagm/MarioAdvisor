@@ -92,7 +92,7 @@ public class Explorador_Carpetas  implements CommandListener{
                 e = FileSystemRegistry.listRoots();
                 browser = new List(currDirName, List.IMPLICIT);
             } else {
-                currDir = (FileConnection)Connector.open("file://localhost/" + currDirName);
+                currDir = (FileConnection)Connector.open("file://localhost/" + currDirName,Connector.READ);
                 e = currDir.list();
                 browser = new List(currDirName, List.IMPLICIT);
                 // not root - draw UP_DIRECTORY
@@ -107,7 +107,7 @@ public class Explorador_Carpetas  implements CommandListener{
                     browser.append(fileName, dirIcon);
                 } else {
                     // this is regular file
-                    browser.append(fileName, fileIcon);
+                    //browser.append(fileName, fileIcon);
                 }
             }
             

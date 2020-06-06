@@ -23,6 +23,8 @@ public class Visor_IMG extends MIDlet  {
     private BT_Canvas bt_canvas;
     private Buscar_Canvas buscar_canvas;
     private Explorador_Carpetas explorador_carpetas;
+    private Tracklog tracklog;
+    private Info_Mapas_Canvas info_mapas_canvas;
     //variables para el formulario de creación de carpeta
     //public Form formulario_carpeta; //selección del directorio de trabajo
     //private ChoiceGroup seleccion_raiz;
@@ -105,11 +107,38 @@ public class Visor_IMG extends MIDlet  {
             } 
         }*/
     }
-    private void arrancar_img_canvas() {
+    public void arrancar_img_canvas() {
         //activa la tarea principal
-        img_Canvas=new IMG_Canvas(this,configuracion);
+        //si el tracklog está activado, crea el objeto
+        inicializar_tracklog();
+        if (img_Canvas!=null) { //esta no es la primera vez que se arranca, hay que liberar memoria antes
+            img_Canvas=null;
+            System.gc();
+        }
+        img_Canvas=new IMG_Canvas(this,configuracion,tracklog);
         pantalla.setCurrent(img_Canvas);
         img_Canvas.inicializar(); 
+    }
+    public void ajustar_parametros_pantalla() {
+        //acceso a la función ajustar_parametros_pantalla del objeto img_canvas
+        img_Canvas.ajustar_parametros_pantalla();
+    }
+    public void inicializar_tracklog() {
+        //crea el objeto tracklog o nó, según lo que diga la configuración
+         if (configuracion.tracklog_activado==true) {
+             if (tracklog!=null) { //el objeto ya existía. se borra y se libera memoria antes de reasignarlo
+                 tracklog=null;
+                 System.gc();
+             }
+            tracklog=new Tracklog(configuracion);
+            //si hay un objeto gestor_GPS, hay que avisarle de que hay nuevo tracklog
+            if (img_Canvas!=null) {
+                img_Canvas.notificar_nuevo_tracklog(tracklog);
+            }
+        }  else { //si no debe existir, y existe, se anula
+             tracklog=null;
+             System.gc();
+        }
     }
     public void mostrar_configuracion() {
         //muestra la pantalla de configuración
@@ -134,6 +163,10 @@ public class Visor_IMG extends MIDlet  {
         if (configuracion.pantalla_completa==true) img_Canvas.setFullScreenMode(true);
         img_Canvas.regenerar_mapa_publico(longitud,latitud,6);
     }
+    public void regenerar_mapa() {
+        //regenera el mapa actual en la posición  actual con el zoom actual. pensado para cambios del lienzo
+        img_Canvas.regenerar_mapa_publico();
+    }
     public void mostrar_BT_canvas() {
         //muestra el formulario de selección de GPS bluetooth
         if (bt_canvas==null) bt_canvas=new BT_Canvas(configuracion,this);
@@ -142,13 +175,18 @@ public class Visor_IMG extends MIDlet  {
     }
     public void mostrar_buscar_canvas(Gestor_Mapas gestor_mapas) {
         //muestra el formulario de búsqueda de elementos del mapa
-        if (buscar_canvas==null) buscar_canvas=new Buscar_Canvas(this,gestor_mapas);
+        if (buscar_canvas==null) buscar_canvas=new Buscar_Canvas(this,gestor_mapas,img_Canvas);
         pantalla.setCurrent(buscar_canvas.frm_buscar);
     }
     public void mostrar_explorador() {
         //muestra el formulario de selección de carpeta
         if (explorador_carpetas==null) explorador_carpetas=new Explorador_Carpetas (this,config_canvas);
         explorador_carpetas.explorar();
+    }
+    public void mostrar_info_mapas(Gestor_Mapas gestor_mapas) {
+        //muestra el formulario con la lista de mapas cargados
+        if (info_mapas_canvas==null) info_mapas_canvas=new Info_Mapas_Canvas (this,gestor_mapas);
+        pantalla.setCurrent(info_mapas_canvas.frm_info_mapas);
     }
     public void pauseApp() {
     }

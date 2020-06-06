@@ -15,12 +15,14 @@ public class Tipo_Resultado_Busqueda {
     //posición y etiqueta de un elemento encontrado
     public float longitud;
     public float latitud;
+    public float distancia;
     public String etiqueta;
     /** Creates a new instance of Tipo_Resultado_Busqueda */
-    public Tipo_Resultado_Busqueda(float longitud,float latitud,String etiqueta) {
+    public Tipo_Resultado_Busqueda(float longitud,float latitud,String etiqueta,float distancia) {
         this.longitud=longitud;
         this.latitud=latitud;
         this.etiqueta=etiqueta;
+        this.distancia=distancia;
     }
     
 }

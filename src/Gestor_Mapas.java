@@ -25,13 +25,17 @@ public  class Gestor_Mapas implements Runnable{
     //valores permitidos de zoom, en metros. un valor de zoom representa la quinta parte de la latitud visible en el mapa
     private int [] zoom={12,20,30,50,80,120,200,300,500,800,1200,2000,3000,5000,8000,12000,20000,30000,50000,80000,120000,200000,300000,500000,800000};
     //nivel de detalle recomendado para cada nivel de zoom (cuanto más bajo, más detalle se permite)
-    private int [] detalle={0,0,0,0,0,0,0,1,1,1,2,2,3,3,3,4,4,4,5,5,5,5,5,6,6,7};
+    private int [] detalle={0,0,0,0,0,0,0,1,1,1,2,2,3,3,3,4,4,4,5,5,5,5,5,5,5,5}; //valores para metroguide
+    //private int [] detalle={0,0,0,0,1,1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7}; //valores para topohispania
     private int detalle_minimo_mapa_general; //nivel a partir del cual sólo dibuja mapas genéricos
     private IMG_Parser archivo_IMG;
-    private String [] lista_mapas;
-    private Tipo_Rectangulo [] limites_mapas;
+    public String [] lista_mapas;
+    public Tipo_Rectangulo [] limites_mapas;
     private boolean [] mapa_general; //true cuando hay un mapa general. si el zoom pedido es superior al mínimo, es el único que muestra
     private boolean [] mapa_interno; //true cuando sea un archivo contenido en el jar
+    private byte [][] niveles_detalle; //niveles reales aceptados por el mapa
+    public boolean [] mapa_valido; //true cuando el mapa es válido
+    public String [] descripcion_mapa; //lista de descripciones de mapas
     private boolean mapa_general_presente;
     private boolean gestion_mapa_general_permitida=true;
     private FileConnection carpeta_archivos;
@@ -42,6 +46,9 @@ public  class Gestor_Mapas implements Runnable{
     private Class clase; //acceso a los archivos internos
     private Tipo_Busqueda busqueda; //acceso al objeto de búsqueda
     private boolean cancelar_busqueda=false; //cancelación de búsqueda
+    private boolean buscando=false; //estado de la búsqueda
+    private IMG_Parser mapa_busqueda; //mapa usado durante la búsqueda. de ámbito en todo el objeto, para cancelar
+    public int radio_busqueda=200; //radio de 200 kms en búsqueda de mapas y dentro de cada mapa. en realidad se usa un cuadrado
 
     
     /** Creates a new instance of Gestor_Mapas */
@@ -112,6 +119,9 @@ public  class Gestor_Mapas implements Runnable{
                 limites_mapas=new Tipo_Rectangulo[vector_temporal.size()];
                 mapa_general=new boolean [vector_temporal.size()];
                 mapa_interno=new boolean [vector_temporal.size()];
+                mapa_valido=new boolean [vector_temporal.size()];
+                niveles_detalle=new byte[vector_temporal.size()][];
+                descripcion_mapa=new String [vector_temporal.size()];
                 //recorre los mapas y obtiene sus límites
                 for (contador=0;contador<vector_temporal.size();contador++) { //recorre la lista empezando por los mapas internos, si hay
                     
@@ -126,15 +136,19 @@ public  class Gestor_Mapas implements Runnable{
                     retorno=archivo_IMG.abrir_mapa(lista_mapas[contador],mapa_interno[contador],clase);
                     if (retorno!=0) {
                         archivo_IMG=null;
+                        mapa_valido[contador]=false; //no se ha podido procesar el mapa
                         //System.gc();
                         continue; //pasa al siguiente mapa
                     }
+                    mapa_valido[contador]=true;
                     limites_mapas[contador]=archivo_IMG.leer_limites(detalle_minimo_mapa_general);
                     if ((gestion_mapa_general_permitida==true) && archivo_IMG.mapa_general==true) {
                         mapa_general[contador]=true;
                         mapa_general_presente=true;
                     }
+                    niveles_detalle[contador]=cargar_niveles_mapa(contador,archivo_IMG);
                     descripcion=archivo_IMG.descripcion_mapa;
+                    descripcion_mapa[contador]=descripcion;
                     retorno=archivo_IMG.cerrar_mapa();
                     archivo_IMG=null;
                     //reduce el área dibujable a la zona inferior, donde se va a escribir
@@ -233,7 +247,20 @@ public  class Gestor_Mapas implements Runnable{
         mapas=new Mapa_IMG[mapas_visibles.length]; //define el array de mapas
         //recorre los mapas encontrados
         for (contador=mapas_visibles.length-1;contador>=0;contador--) {
-            if (mapa_general_presente==true) {
+            if (niveles_detalle[mapas_visibles[contador]][nivel_zoom]!=-1) { //mapa disponible para exte nivel de detalle
+                try {
+                    archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]],mapa_interno[mapas_visibles[contador]],clase);;
+                    mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom],procesar_NET);
+                    if (mapas[contador]!=null) {
+                        mapas[contador].niveles_detalle=this.niveles_detalle[mapas_visibles[contador]];
+                    }
+                } catch (Throwable t) {
+                    mapas[contador]=null;
+                    break;
+                }         
+            }
+            
+            /*if (mapa_general_presente==true) {
                 if (detalle[nivel_zoom]>=detalle_minimo_mapa_general) {
                     //sólo procesará el mapa si es el general
                     if (mapa_general[mapas_visibles[contador]]==true) {
@@ -268,10 +295,37 @@ public  class Gestor_Mapas implements Runnable{
                     mapas[contador]=null;
                     break;
                 }
-            }
+            }*/
             //System.gc();
         }
         return mapas;
+    }
+    private byte [] cargar_niveles_mapa (int numero_mapa,IMG_Parser archivo_img) {
+        //devuelve los niveles de zoom de un archivo IMG, corregidos con el nivel de mapa general
+        //así se tiene disponible la información del nivel de detalle para el
+        //zoom anterior y posterior
+        int contador;
+        int frontera_mapa_general=-1; //número de zoom en el que se cambia a mapa general
+        if (this.gestion_mapa_general_permitida==true) { //busca el valor de zoom en el que se cambia a mapa general
+            for (contador=0;contador<25;contador++) {
+                if(this.detalle[contador]==this.detalle_minimo_mapa_general) {
+                    frontera_mapa_general=contador;
+                    break;
+                }
+            }
+        }
+        byte [] niveles_detalle=new byte[25];
+        for (contador=0;contador<25;contador++) {
+            niveles_detalle[contador]=archivo_img.corregir_nivel((byte)detalle[contador]);
+            //si se usa el mapa general, se invalidan:
+            //*niveles superiores de mapas de detalle
+            //*niveles inferiores de mapas generales
+            if (this.gestion_mapa_general_permitida==true) { //correcciones por mapa general
+                if (mapa_general[numero_mapa]==true && contador<frontera_mapa_general) niveles_detalle[contador]=-1;
+                if (mapa_general[numero_mapa]==false && niveles_detalle[contador]>=this.detalle_minimo_mapa_general) niveles_detalle[contador]=-1;
+            }
+        }
+        return niveles_detalle;
     }
     private boolean interseccion_limites(Tipo_Rectangulo rectangulo1,Tipo_Rectangulo rectangulo2){
         //devuelve true si hay interferencia entre los dos rectángulos
@@ -306,6 +360,21 @@ public  class Gestor_Mapas implements Runnable{
             total.addElement(parcial.elementAt(contador));
         }
     }
+    public Tipo_Rectangulo centro_radio_2_rectangulo(float longitud_centro,float latitud_centro,int radio){
+        //convierte las coordenadas del centro y el radio (km) a un rectángulo con los límites norte, sur, este, oeste
+        Tipo_Rectangulo rectangulo=new Tipo_Rectangulo();
+        double altura;
+        double anchura;
+        //altura=0.000135*zoom[nivel_zoom2];
+        //anchura=0.000108*zoom[nivel_zoom2]/Math.cos(Math.toRadians(latitud_centro));
+        altura=0.009*radio;
+        anchura=0.009*radio/Math.cos(Math.toRadians(latitud_centro));
+        rectangulo.norte=(float)(latitud_centro+altura);
+        rectangulo.sur=(float)(latitud_centro-altura);
+        rectangulo.oeste=(float)(longitud_centro-anchura);
+        rectangulo.este=(float)(longitud_centro+anchura);
+        return rectangulo;
+    }    
     public  class Cache_IMG {
         final int capacidad; //nº de archivos que pueden estar abiertos como máximo
         private IMG_Parser [] cache; //lista de archivos
@@ -388,6 +457,11 @@ public  class Gestor_Mapas implements Runnable{
             }
             return indice_menor;
         }
+        //public IMG_Parser elemento_numero(int numero) {
+        //    //devuelve el elemento solicitado
+        //    if (numero<=capacidad) return cache[numero];
+        //    return null; //elemento solicitado inexistente
+        //}
     }
     public int leer_detalle(int nivel_zoom) {
         //devuelve el detalle correspondiente a un nivel de zoom
@@ -404,42 +478,74 @@ public  class Gestor_Mapas implements Runnable{
     public void cancelar_busqueda () {
         //si hay un mapa cargado buscando, le avisa de que debe terminar, 
         //y avisa también a la tarea en secundario de que no debe cargar más mapas
-        cancelar_busqueda=true;
+        if (buscando==true) {
+            cancelar_busqueda=true;
+            if (mapa_busqueda!=null) {
+                mapa_busqueda.cancelar_busquedas();
+            }
+        }
+        while (buscando==true);
+        
+        
     }
     public void run() {
         //tarea de búsqueda
-        IMG_Parser mapa;
+        buscando=true;
+        
         int contador;
         int resultado;
         if (cancelar_busqueda==true) {
             cancelar_busqueda=false;
+            buscando=false;
             return; //si hay orden de cancelación, no empieza
         }
         Vector resultados_parciales=new Vector();
         for (contador=0;contador<lista_mapas.length;contador++)  {
+            if (cancelar_busqueda==true) break;
+            //por ahora se evitan los mapas generales a la hora de buscar
+            if (mapa_general[contador]==true) continue;
+            if (busqueda.criterios_busqueda.ordenar_por_distancia==true) { 
+                //si se busca por distancia, antes de abrir el mapa hay que comprobar si
+                //hay áreas del mapa dentro del radio de búsqueda
+                Tipo_Rectangulo radio_busqueda;
+                radio_busqueda=centro_radio_2_rectangulo(busqueda.criterios_busqueda.longitud,busqueda.criterios_busqueda.latitud,100);
+                if (interseccion_limites(radio_busqueda,limites_mapas[contador])==false) continue; //el mapa no intersecta
+            }
+            if (cache.archivo_presente(lista_mapas[contador])!=-1) { //el mapa está abierto
+                mapa_busqueda=cache.abrir_archivo(lista_mapas[contador],mapa_interno[contador],clase);
+                resultados_parciales= mapa_busqueda.buscar(busqueda.criterios_busqueda);
+            } else { //hay que abrir el mapa y buscar
+                mapa_busqueda=new IMG_Parser(false); //nuevo IMG, sin caché de etiquetas
+                resultado=mapa_busqueda.abrir_mapa(lista_mapas[contador],mapa_interno[contador],clase);
+                if (resultado!=0) continue; //error de apertura
+                if (cancelar_busqueda==true) {
+                    mapa_busqueda.cerrar_mapa();
+                    break;
+                }
+                resultado=mapa_busqueda.procesar_tre(detalle_minimo_mapa_general);
+                if (resultado!=0) continue; //error de proceso
+                if (cancelar_busqueda==true) {
+                    mapa_busqueda.cerrar_mapa();
+                    break;
+                }
+                resultado=mapa_busqueda.procesar_rgn();
+                if (resultado!=0) continue; //error de proceso
+                if (cancelar_busqueda==true) {
+                    mapa_busqueda.cerrar_mapa();
+                    break;
+                }
+                resultados_parciales= mapa_busqueda.buscar(busqueda.criterios_busqueda);
+                mapa_busqueda.cerrar_mapa();
+                mapa_busqueda=null;
+            }
             if (cancelar_busqueda==true) { //limpia variables y sale
                 if (resultados_parciales!=null) resultados_parciales=null; 
                 cancelar_busqueda=false;
+                buscando=false;
+                busqueda.notificar_final_busqueda();
                 return;
-            }
-            //por ahora se evitan los mapas generales a la hora de buscar
-            if (mapa_general[contador]==true) continue;
-            if (cache.archivo_presente(lista_mapas[contador])!=-1) { //el mapa está abierto
-                mapa=cache.abrir_archivo(lista_mapas[contador],mapa_interno[contador],clase);
-                resultados_parciales= mapa.buscar(busqueda.criterios_busqueda);
-            } else { //hay que abrir el mapa y buscar
-                mapa=new IMG_Parser(false); //nuevo IMG, sin caché de etiquetas
-                resultado=mapa.abrir_mapa(lista_mapas[contador],mapa_interno[contador],clase);
-                if (resultado!=0) continue; //error de apertura
-                resultado=mapa.procesar_tre(detalle_minimo_mapa_general);
-                if (resultado!=0) continue; //error de proceso
-                resultado=mapa.procesar_rgn();
-                if (resultado!=0) continue; //error de proceso
-                resultados_parciales= mapa.buscar(busqueda.criterios_busqueda);
-                mapa.cerrar_mapa();
-                mapa=null;
-            }
-            //System.gc(); //limpieza
+            }            
+            System.gc(); //limpieza
             if (resultados_parciales==null) continue;
             busqueda.añadir_resultados(resultados_parciales);
             if (resultados_parciales.size()>0) { //si hay resultados, lo notifica al objeto de búsqueda
@@ -447,7 +553,7 @@ public  class Gestor_Mapas implements Runnable{
             }
         }
         busqueda.notificar_final_busqueda();
-        
-        
+        buscando=false;
+        cancelar_busqueda=false;
     }
 }

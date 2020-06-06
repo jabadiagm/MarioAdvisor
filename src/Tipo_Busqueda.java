@@ -39,7 +39,6 @@ public class Tipo_Busqueda {
         resultados_busqueda=new Vector();
         this.estado=this.estado_buscando;
         gestor_mapas.buscar(this);
-        this.estado=estado_inactivo;
         return 0;
     }
     public void añadir_resultados(Vector parcial) {
@@ -70,6 +69,8 @@ public class Tipo_Busqueda {
         //ordena los resultados por orden alfabético o por distancia
         if (criterios_busqueda.ordenar_por_distancia==false) { //orden alfabético
             ordenar_alfabeticamente (resultados_busqueda,0,resultados_busqueda.size()-1);
+        } else {
+            ordenar_por_distancia (resultados_busqueda,0,resultados_busqueda.size()-1);
         }
     }
     private void ordenar_alfabeticamente(Vector src,int left,int right) {
@@ -91,6 +92,26 @@ public class Tipo_Busqueda {
             ordenar_alfabeticamente(src, i + 1, right);
         }        
     }
+    private static void ordenar_por_distancia(Vector src, int left, int right) {
+        if (right > left) {
+            Tipo_Resultado_Busqueda o1 = (Tipo_Resultado_Busqueda)src.elementAt(right);
+            int i = left - 1;
+            int j = right;
+            while (true) {
+                while (((Tipo_Resultado_Busqueda)src.elementAt(++i)).distancia<o1.distancia);
+                while (j > 0)
+                    if (((Tipo_Resultado_Busqueda)src.elementAt(--j)).distancia<=o1.distancia)
+                        break;
+                if (i >= j)
+                    break;
+                swap(src, i, j);
+            }
+            swap(src, i, right);
+            ordenar_por_distancia(src, left, i - 1);
+            ordenar_por_distancia(src, i + 1, right);
+        }
+    }
+    
     private static void quickSort(Vector src, int left, int right) {
         if (right > left) {
             Tipo_Punto o1 = (Tipo_Punto)src.elementAt(right);

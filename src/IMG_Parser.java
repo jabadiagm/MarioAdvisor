@@ -28,6 +28,8 @@ public class IMG_Parser {
     private boolean tre_procesado; //indica que la información de las subdivisiones ya ha sido leída
     private boolean rgn_procesado; //indica que los punteros dentro del subarchivo RGN han sido definidos
     private boolean lbl_procesado; //indica que la cabecera del subarchivo LBL ha sido leída
+    private boolean cancelar_busqueda=false;
+    private boolean buscando=false; //true mientras se ejecuta buscar()
     private int xor_byte;
     private int puntero; //posición actual dentro del archivo (byte)
     private int punto_reinicio; //posición a la que volverá el puntero de archivo al resetear
@@ -47,6 +49,7 @@ public class IMG_Parser {
     private boolean mapa_interno; //cuando es interno no se usa la variable archivo_IMG
     private Class clase; //acceso a los archivos del jar
     Tipo_Cache_Etiquetas cache_etiquetas;
+    final static public double SQRT3 = 1.732050807568877294; //constante para las funciones trigonométricas
     int nose;
     int nose2[][]={{1,2},{3,4}};
     /** Creates a new instance of IMG_Parser */
@@ -216,7 +219,7 @@ public class IMG_Parser {
         ultimo_error="";
         return 0; //archivo de mapa cerrado sin problemas
     }
-    private int procesar_cabecera_tre(int detalle_general){
+    private int procesar_cabecera_TRE(int detalle_general){
         //lee los límites del mapa actual y los niveles de zoom
         //detalle_general es el valor a partir del cual se dibuja el plano general.
         //si el mapa general tiene niveles con menor zoom, se ajustan para que no haya solapes
@@ -238,10 +241,11 @@ public class IMG_Parser {
         }
         valor_byte=leer_byte();
         valor_byte=leer_byte();
-        if (valor_byte==0x80) { //mapa bloqueado, no se puede leer
+        if (valor_byte!=0) TRE.bloqueado=true;
+        /*if (valor_byte==0x80) { //mapa bloqueado, no se puede leer
             ultimo_error="Archivo bloqueado.";
             return 3;
-        }
+        }*/
         this.avanzar_puntero(7); //salto a los limites del mapa
         TRE.limite_norte=trio_2_latlon(leer_trio());
         TRE.limite_este=trio_2_latlon(leer_trio());
@@ -251,6 +255,10 @@ public class IMG_Parser {
         TRE.tamaño_niveles_TRE1=leer_quad();
         TRE.offset_subdivisiones_TRE2=leer_quad();
         TRE.tamaño_subdivisiones_TRE2=leer_quad();
+        if (tamaño_cabecera>154) { //si tiene cabecera de 188 bytes, hay que leer la clave
+            this.ajustar_puntero(tre.puntero_inicio+0xaa); //posición de la clave
+            TRE.clave=leer_cadena_bytes(4);
+        }
         //asigna espacio para TRE1 y lo rellena
         TRE.TRE1 =new Tipo_Niveles_TRE1 [TRE.tamaño_niveles_TRE1/4];
         rellenar_TRE1(detalle_general);
@@ -261,7 +269,7 @@ public class IMG_Parser {
     public Tipo_Rectangulo leer_limites(int detalle_general){
         int valor_int;
         if (cabecera_tre_procesada==false) {
-            valor_int=procesar_cabecera_tre(detalle_general);
+            valor_int=procesar_cabecera_TRE(detalle_general);
             if (valor_int!=0) return null;
         }
         Tipo_Rectangulo frontera=new Tipo_Rectangulo(TRE.limite_norte,TRE.limite_sur,TRE.limite_este,TRE.limite_oeste);
@@ -274,12 +282,12 @@ public class IMG_Parser {
         //si el mapa general tiene niveles con menor zoom, se ajustan para que no haya solapes
         int valor_int;
         if (cabecera_tre_procesada==false) {
-            valor_int=procesar_cabecera_tre(detalle_general);
+            valor_int=procesar_cabecera_TRE(detalle_general);
             if (valor_int!=0) return valor_int; //archivo no abierto ó error de acceso
         }
         //asigna espacio para TRE2
         //TRE.TRE2=new Vector();//TRE.tamaño_subdivisiones_TRE2/14); //tamaño aproximado (algo mayor) de la sección de subdivisiones
-        TRE.TRE2=new Tipo_Subdivisiones_TRE2[TRE.tamaño_subdivisiones_TRE2/14]; //tamaño aproximado (algo mayor) de la sección de subdivisiones
+         TRE.TRE2=new Tipo_Subdivisiones_TRE2[TRE.tamaño_subdivisiones_TRE2/14]; //tamaño aproximado (algo mayor) de la sección de subdivisiones
         rellenar_TRE2();
         tre_procesado=true;
         ultimo_error="";
@@ -291,29 +299,132 @@ public class IMG_Parser {
         int numero_niveles;
         int subdivisiones_acumuladas=0; //suma de subdivisiones de los niveles anteriores
         int zoom_minimo=666; //si el nivel mínimo no es cero, supone mapa general
+        int byte1,byte2;
+        byte [] tre1_cadena;
         Tipo_Niveles_TRE1 temporal;
         //coloca el puntero al comienzo de TRE1
         this.ajustar_puntero(tre.puntero_inicio+TRE.offset_niveles_TRE1);
         numero_niveles=TRE.tamaño_niveles_TRE1/4;
+        tre1_cadena=leer_cadena_bytes(TRE.tamaño_niveles_TRE1);
+        if (TRE.bloqueado==true) {
+            desencriptar_TRE1(tre1_cadena,TRE.clave);
+        }
+        //ahora se parsea desde la cadena
+        int puntero=0;
         for (contador=0;contador<numero_niveles;contador++) {
             temporal=new Tipo_Niveles_TRE1();
             TRE.TRE1[contador]=temporal;
-            TRE.TRE1[contador].zoom=(byte)(leer_byte() & 0x0f);
-            TRE.TRE1[contador].bits_coordenada=leer_byte();
-            TRE.TRE1[contador].subdivisiones=leer_palabra();
+            TRE.TRE1[contador].zoom=(byte)(tre1_cadena[puntero] & 0x0f);
+            puntero++;
+            TRE.TRE1[contador].bits_coordenada=(byte)tre1_cadena[puntero];
+            puntero++;
+            byte1=tre1_cadena[puntero]&0xff;
+            puntero++;
+            byte2=(tre1_cadena[puntero]&0xff)<<8;
+            puntero++;
+            TRE.TRE1[contador].subdivisiones=byte1|byte2;
             TRE.TRE1[contador].puntero_primera_subdivision=subdivisiones_acumuladas;
             subdivisiones_acumuladas+=TRE.TRE1[contador].subdivisiones;
             TRE.numero_subdivisiones=subdivisiones_acumuladas;
             if (TRE.TRE1[contador].zoom<zoom_minimo) zoom_minimo=TRE.TRE1[contador].zoom;
             //ajusta el zoom mínimo
-        }
+        }        
+
+
         if (zoom_minimo>0) { //mapa general
             this.mapa_general=true;
-            if (zoom_minimo<detalle_general) { //hay que corregir los niveles de zoom
+            if (zoom_minimo!=detalle_general) { //hay que corregir los niveles de zoom
                 for (contador=0;contador<numero_niveles;contador++) {
                     TRE.TRE1[contador].zoom+=detalle_general-zoom_minimo;
                 }
             }
+        }
+    }
+    void desencriptar_TRE1 (byte [] tre1_cadena,byte [] clave) {
+        //usa el algoritmo de jetmouse para dejar en claro TRE1
+        long [] masking_table={11,12,10,0,8,15,2,1,6,4,9,3,13,5,7,14};
+        //variables
+        int byte1,byte2,byte3,byte4;
+        long var_c,var_8,var_4;
+        //registros
+        long eax,ebx,ecx,edx,esi,edi,ebp;
+        //asigna los parámetros a los registros
+        eax=0;
+        edx=tre1_cadena.length;
+        byte1=(int)clave[3]& 0x000000ff;
+        byte2=(int)clave[2]& 0x000000ff;
+        byte3=(int)clave[1]& 0x000000ff;
+        byte4=(int)clave[0]& 0x000000ff;
+        ecx=byte1<<24 | byte2<<16 | byte3<<8 |byte4;
+        var_c = ecx;
+        if (edx == 0) return; //longitud de encriptación =0, nada que hacer
+        //prepara la clave?
+        esi = var_c;
+        esi>>=24;
+        ecx = var_c;
+        ecx>>=16;
+        esi+=ecx;
+        ecx = var_c;
+        ecx>>=8;
+        esi+=ecx;
+        esi+=var_c;
+        esi&=0x0f;
+        ecx = 0;
+        ecx = masking_table[(int)esi];
+        var_8 = ecx;
+        esi = 4;
+        edx--;
+        if (edx==0) return;
+        edx++;
+        var_4 = edx;
+        ebp = 0;
+        //comienzo del desencriptado
+        while (var_4!=0) {
+            ecx = esi;
+            ecx<<=2;
+            edx = var_c;
+            edx>>=(int)ecx;
+            edx&=0x0f;
+            ecx = 0;
+            ecx = (int)tre1_cadena[(int)(eax + ebp)] & 0x000000ff;
+            ecx>>=4;
+            ebx = 0;
+            ebx = masking_table[(int)edx];
+            ecx-=ebx;
+            ecx-=var_8;
+            ecx-=edx;
+            ecx&=0x0f;
+            edx = ecx;
+            if (esi!=0) {
+                esi--;
+            } else {
+                esi = 4;
+            }
+            ecx = esi;
+            ecx<<=2;
+            edi = var_c;
+            edi>>=ecx;
+            edi&=0x0f;
+            ecx = 0;
+            ecx = (int)tre1_cadena[(int)(eax + ebp)] & 0x000000ff;
+            ebx = 0;
+            ebx = masking_table[(int)edi];
+            ecx-=ebx;
+            ecx-=var_8;
+            ecx-=edi;
+            ecx&=0x0f;
+            edi = ecx;
+            edx<<=4;
+            ecx = edi;
+            edx |=ecx;
+            tre1_cadena[(int)(eax + ebp)]=(byte) edx;
+            if (esi!=0) {
+                esi--;
+            } else {
+                esi=4;
+            }
+            ebp++;
+            var_4--;
         }
     }
     void rellenar_TRE2(){ //procesa las subdivisiones
@@ -610,22 +721,26 @@ public class IMG_Parser {
                     while (this.puntero<RGN.final_polilineas[subdivisiones_visibles[contador]]) {
                         añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
                     }
-                }
+                } 
                 if (subdivision.objetos_poligonos==true) {
                     //comienzo de la sección de polígonos de la subdivisión
                     this.ajustar_puntero(RGN.puntero_poligonos[subdivisiones_visibles[contador]]);
                     while (this.puntero<RGN.final_poligonos[subdivisiones_visibles[contador]]) {
                         añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
                     }
-                }
+                } 
                 //if (contador%10==0) System.gc(); //libera memoria antes de pasar a la siguiente subdivisión
             }
             if (procesar_NET==true) { //proceso completo de etiquetas
-                procesar_etiquetas_NET(lista_etiquetas,lista_etiquetas_NET); //localiza las etiquetas situadas en el subarchivo NET
-                procesar_POIs(lista_etiquetas,lista_POIs);
+                if (lista_etiquetas_NET.size()>0) procesar_etiquetas_NET(lista_etiquetas,lista_etiquetas_NET); //localiza las etiquetas situadas en el subarchivo NET
+                if (lista_POIs.size()>0) procesar_POIs(lista_etiquetas,lista_POIs);
                 
             }
-            procesar_etiquetas_mapa(lista_etiquetas,mapa); //rellena las etiquetas
+            if (lista_etiquetas.size()>0) {
+                procesar_etiquetas_mapa(lista_etiquetas,mapa); //rellena las etiquetas
+            }
+            //corrige las cotas de elevación y las pone en metros
+            corregir_etiquetas_elevacion(mapa);
             return mapa;
 /*        } catch (Throwable t) {
             //probablemente la memoria se ha agotado. sale del bucle y devuelve lo que pueda
@@ -636,6 +751,61 @@ public class IMG_Parser {
             return null; 
         } */
     }
+    private void corregir_etiquetas_elevacion (Mapa_IMG mapa) {
+        //las cotas de las líneas de nivel y las cimas están en pies, así
+        //que antes de dibujarlas hay que pasarlas a metros. 1 foot = 0.3048 meters
+        int contador;
+        String cadena;
+        Tipo_Punto punto;
+        Tipo_Poli poli;
+        //busca los puntos de tipo 6200 (depth) y 6300 (elevation)
+        //puntos
+        for (contador=mapa.Puntos.size()-1;contador>=0;contador--) {
+            punto=(Tipo_Punto)(mapa.Puntos.elementAt(contador));
+            if (punto.tipo==0x6200 || punto.tipo==0x6300) {
+                //puede ser un punto normal ó un POI
+                if (punto.etiqueta!=null) pies_2_metros(punto.etiqueta);
+                if (punto.etiqueta_POI!=null) pies_2_metros(punto.etiqueta_POI.etiquetas[0]);
+            }
+        }
+        //puntos indexados
+        for (contador=mapa.Puntos_Indexados.size()-1;contador>=0;contador--) {
+            punto=(Tipo_Punto)(mapa.Puntos_Indexados.elementAt(contador));
+            if (punto.tipo==0x6200 || punto.tipo==0x6300) {
+                //puede ser un punto normal ó un POI
+                if (punto.etiqueta!=null) pies_2_metros(punto.etiqueta);
+                if (punto.etiqueta_POI!=null) pies_2_metros(punto.etiqueta_POI.etiquetas[0]);
+            }
+        }
+        //curvas de elevación. tipo=0x20, 0x21 y 0x22
+        for (contador=mapa.Polilineas.size()-1;contador>=0;contador--) {
+            poli=(Tipo_Poli)(mapa.Polilineas.elementAt(contador));
+            if (poli.tipo==0x20 || poli.tipo==0x21 || poli.tipo==0x22) {
+                //puede ser un punto normal ó un POI
+                if (poli.etiqueta!=null) pies_2_metros(poli.etiqueta);
+                if (poli.etiqueta_NET!=null) pies_2_metros(poli.etiqueta_NET.etiquetas[0]);
+            }
+        }
+        
+        
+    }
+    private void pies_2_metros(Tipo_Etiqueta etiqueta) {
+        //cambia el texto de una etiqueta de elevación, para ponerla en metros. 1 foot = 0.3048 meters
+        String cadena;
+        int tipo_entero;
+        float tipo_float;
+        cadena=etiqueta.nombre_completo;
+        try { //comprueba que no haya sido ya pasada a metros
+            tipo_entero=Integer.parseInt(cadena);
+        } catch (Exception ex) {
+            return; //el error de formato debería significar que ya está en metros
+        }
+        tipo_float=(float)(0.3048*tipo_entero);
+        //cambia el valor del texto de la etiqueta
+        etiqueta.nombre_completo=new Integer((int)(tipo_float+0.5)).toString()+"m";
+        etiqueta.nombre_corto=etiqueta.nombre_completo;
+        
+    }
     public Vector buscar(Tipo_Criterios_Busqueda criterios_busqueda) {
         //busca en el nivel más detallado del mapa los elementos que
         //cumplan los criterios indicados
@@ -645,6 +815,7 @@ public class IMG_Parser {
         int contador;
         int tipo;
         int nose;
+        buscando=true;
         Tipo_Subdivisiones_TRE2 subdivision;
         Vector lista_etiquetas=new Vector();
         Vector lista_etiquetas_NET=new Vector();
@@ -653,6 +824,7 @@ public class IMG_Parser {
         Vector resultados; //lista final de elementos que cumplen los criterios
         Tipo_Punto punto;
         String texto_etiqueta;
+        float distancia; //distancia geodésica
         puntero_nivel_minimo=TRE.TRE1.length-1; //obtiene el nivel más detallado. en mapas normales debería ser el nivel 0
         if (mapa_general==true) puntero_nivel_minimo--;
         n_bits=TRE.TRE1[puntero_nivel_minimo].bits_coordenada;
@@ -666,7 +838,7 @@ public class IMG_Parser {
             if ((subdivision.objetos_puntos==true && criterios_busqueda.tipo_busqueda==criterios_busqueda.Tipo_Busqueda_Puntos && criterios_busqueda.incluir_tipo==false) || (subdivision.objetos_puntos==true && criterios_busqueda.tipo_busqueda==criterios_busqueda.Tipo_Busqueda_Puntos && criterios_busqueda.incluir_tipo==true && criterios_busqueda.tipo!=0)) {
                 //comienzo de la sección de puntos de la subdivisión
                 this.ajustar_puntero(RGN.puntero_puntos[contador]);
-                while (this.puntero<RGN.final_puntos[contador]) {
+                while (this.puntero<RGN.final_puntos[contador] && cancelar_busqueda==false) {
                     //lee la información del punto
                     punto=procesar_punto(n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
                     if (criterios_busqueda.incluir_tipo==true) {
@@ -677,6 +849,10 @@ public class IMG_Parser {
                         } else { //no se busca ciudad
                             if (tipo!=criterios_busqueda.tipo) continue; //no es el tipo buscado
                         }
+                    }
+                    if (criterios_busqueda.ordenar_por_distancia==true) {
+                        distancia=distancia_geodesica(punto.longitud,punto.latitud,criterios_busqueda.longitud,criterios_busqueda.latitud);
+                        if (distancia>criterios_busqueda.radio_busqueda) continue; //punto lejano
                     }
                     //añade el punto al mapa
                     //si hay etiqueta, la añade
@@ -689,7 +865,7 @@ public class IMG_Parser {
             if (subdivision.objetos_puntos_indexados==true && criterios_busqueda.tipo_busqueda==criterios_busqueda.Tipo_Busqueda_Puntos) {
                 //comienzo de la sección de puntos indexasdos de la subdivisión
                 this.ajustar_puntero(RGN.puntero_puntos_indexados[contador]);
-                while (this.puntero<RGN.final_puntos_indexados[contador]) {
+                while (this.puntero<RGN.final_puntos_indexados[contador] && cancelar_busqueda==false) {
                     //lee la información del punto
                     punto=procesar_punto(n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
                     if (criterios_busqueda.incluir_tipo==true) {
@@ -701,6 +877,10 @@ public class IMG_Parser {
                             if (tipo!=criterios_busqueda.tipo) continue; //no es el tipo buscado
                         }
                     }
+                    if (criterios_busqueda.ordenar_por_distancia==true) {
+                        distancia=distancia_geodesica(punto.longitud,punto.latitud,criterios_busqueda.longitud,criterios_busqueda.latitud);
+                        if (distancia>criterios_busqueda.radio_busqueda) continue; //punto lejano
+                    }                    
                     //añade el punto al mapa
                     //si hay etiqueta, la añade
                     crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
@@ -710,7 +890,11 @@ public class IMG_Parser {
             }
             //if (contador%100==0) System.gc(); //libera es espacio ocupado por la subdivisión
         }
-        if (candidatos.size()==0) return null; //no hay candidatos
+        if (candidatos.size()==0 ||cancelar_busqueda==true) {
+            buscando=false;
+            cancelar_busqueda=false;
+            return null; //no hay candidatos
+        }
         resultados=new Vector();
         try {
             procesar_etiquetas_NET(lista_etiquetas,lista_etiquetas_NET); //localiza las etiquetas situadas en el subarchivo NET
@@ -726,6 +910,7 @@ public class IMG_Parser {
         Tipo_Etiqueta etiqueta;
         int valor_int;
         for (contador=lista_etiquetas.size()-1;contador>=0;contador--) {
+            if (cancelar_busqueda==true) break;
             etiqueta=(Tipo_Etiqueta)(lista_etiquetas.elementAt(contador));
             if (etiqueta.nombre_completo.compareTo("")==0) { //si la etiqueta no está definida
                 try {
@@ -740,6 +925,7 @@ public class IMG_Parser {
         }
         //busca entre los candidatos los que contengan la cadena indicada
         for (contador=0;contador<candidatos.size();contador++) {
+            if (cancelar_busqueda==true) break;
             punto=(Tipo_Punto)candidatos.elementAt(contador);
             if (punto.es_POI==false) { //etiqueta en un lugar u otro dependiendo de si es POI o nó
                 if (punto.etiqueta==null) continue;
@@ -750,13 +936,26 @@ public class IMG_Parser {
             }
             
             if (texto_etiqueta.toLowerCase().indexOf(criterios_busqueda.texto.toLowerCase())!=-1) { //texto contenido en la etiqueta
-                resultados.addElement(new Tipo_Resultado_Busqueda(punto.longitud,punto.latitud,texto_etiqueta));
+                resultados.addElement(new Tipo_Resultado_Busqueda(punto.longitud,punto.latitud,texto_etiqueta,distancia_geodesica(punto.longitud,punto.latitud,criterios_busqueda.longitud,criterios_busqueda.latitud)));
             }
         }
         //System.gc();
-        if (resultados.size()==0) return null;
+        if (cancelar_busqueda==true) {
+            cancelar_busqueda=false;
+            buscando=false;
+            return null;
+        }
+        if (resultados.size()==0) {
+            buscando=false;
+            return null;
+        }
+        buscando=false;
         return resultados;
         
+    }
+    public void cancelar_busquedas() {
+        if (buscando==true) this.cancelar_busqueda=true;
+        while (buscando==true);
     }
     private void procesar_etiquetas_NET(Vector lista_etiquetas,Vector lista_etiquetas_NET) {
         //ordena las etiquetas para mejorar el tiempo de acceso, y luego
@@ -1034,6 +1233,8 @@ public class IMG_Parser {
         bits_base_longitud=valor_int & 0x0f;
         bits_base_latitud=(valor_int & 0xf0)>>4;
         cadena_poli_byte=leer_cadena_bytes(longitud_cadena);
+        if (poligono==false && (poli.tipo==0x20 || poli.tipo==0x21 || poli.tipo==0x22)) return; //evita las curvas de nivel
+        //parseo de los puntos a partir de la cadena
         mismo_signo_longitud=leer_bit_cadena(cadena_poli_byte,puntero_bit);
         if (mismo_signo_longitud==true) {//mismo signo
             signo_longitud=leer_bit_cadena(cadena_poli_byte,puntero_bit);
@@ -1287,14 +1488,19 @@ public class IMG_Parser {
     }
     
 //funciones de obtención de niveles
-    private byte corregir_nivel(byte nivel){
+    public byte corregir_nivel(byte nivel){
         //dado un nivel, devuelve el valor más cercano que tenga geometría
         byte nuevo_nivel;
         byte nivel_maximo;
+        byte nivel_minimo;
         int contador;
         nivel_maximo=TRE.TRE1[TRE.indice_maximo_nivel_con_geometria].zoom;
-        if (nivel>nivel_maximo) nuevo_nivel=nivel_maximo; //el nivel pedido no existe o no tiene geometría
-        else nuevo_nivel=nivel; //nivel válido
+        nivel_minimo=TRE.TRE1[TRE.TRE1.length-1].zoom; //nivel menos detallado
+        if (nivel < nivel_minimo) {
+            nuevo_nivel=nivel_minimo; //se ha pedido un nivel menor que el mínimo de un mapa general
+        } else if (nivel>nivel_maximo)  {
+            nuevo_nivel=nivel_maximo; //el nivel pedido no existe o no tiene geometría
+        }   else nuevo_nivel=nivel; //nivel válido
         //también puede pasar que no exista geometría en ese nivel. entonces, se busca el inmediatamente anterior
         while (existe_nivel(nuevo_nivel)==false && nuevo_nivel>0) //si no existe este nivel...
         {
@@ -1784,7 +1990,73 @@ public class IMG_Parser {
         return etiqueta;
         
     }
-    
+    public float distancia_geodesica(float longitud1,float latitud1,float longitud2, float latitud2) {
+        final float degtorad = 0.01745329f;
+        final float radtodeg = 57.29577951f;
+        float dlong;
+        double dvalue;
+        double dd;
+        dlong = (longitud1 - longitud2);
+        dvalue =(Math.sin(latitud1 * degtorad) * Math.sin(latitud2 * degtorad))  + (Math.cos(latitud1 * degtorad) * Math.cos(latitud2 * degtorad)   * Math.cos(dlong * degtorad));
+        dd = acos(dvalue) * radtodeg;
+        return (float)(dd * 111.302);
+    }
+    //funciones trigonométricas inversas
+    static public double acos(double x) {
+        double f=asin(x);
+        if(f==Double.NaN)
+            return f;
+        return Math.PI/2-f;
+    }
+    static public double asin(double x) {
+        if( x<-1. || x>1. ) return Double.NaN;
+        if( x==-1. ) return -Math.PI/2;
+        if( x==1 ) return Math.PI/2;
+        return atan(x/Math.sqrt(1-x*x));
+    }
+    static public double atan(double x) {
+        boolean signChange=false;
+        boolean Invert=false;
+        int sp=0;
+        double x2, a;
+        // check up the sign change
+        if(x<0.) {
+            x=-x;
+            signChange=true;
+        }
+        // check up the invertation
+        if(x>1.) {
+            x=1/x;
+            Invert=true;
+        }
+        // process shrinking the domain until x<PI/12
+        while(x>Math.PI/12) {
+            sp++;
+            a=x+SQRT3;
+            a=1/a;
+            x=x*SQRT3;
+            x=x-1;
+            x=x*a;
+        }
+        // calculation core
+        x2=x*x;
+        a=x2+1.4087812;
+        a=0.55913709/a;
+        a=a+0.60310579;
+        a=a-(x2*0.05160454);
+        a=a*x;
+        // process until sp=0
+        while(sp>0) {
+            a=a+Math.PI/6;
+            sp--;
+        }
+        // invertation took place
+        if(Invert) a=Math.PI/2-a;
+        // sign change took place
+        if(signChange) a=-a;
+        //
+        return a;
+    } 
     //estructuras de subarchivos y subestructuras
     private class Tipo_Subarchivo { //clase interna para manejo de los subarchivos
         int bloque_inicial;
@@ -1795,6 +2067,7 @@ public class IMG_Parser {
         String nombre;
     }
     private class Tipo_TRE { //estructura básica de un subarchivo TRE, que contiene TRE1 y TRE2
+        boolean bloqueado; //true si está bloqueado
         float limite_norte;
         float limite_este;
         float limite_sur;
@@ -1804,6 +2077,7 @@ public class IMG_Parser {
         int offset_subdivisiones_TRE2;
         int tamaño_subdivisiones_TRE2;
         int numero_subdivisiones;
+        byte [] clave; //usada para desbloquear el mapa
         Tipo_Niveles_TRE1 [] TRE1;
         int indice_maximo_nivel_con_geometria; //puntero al nivel de menos detalle que tiene geometría
         //Vector TRE2;

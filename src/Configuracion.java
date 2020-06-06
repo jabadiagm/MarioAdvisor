@@ -40,12 +40,13 @@ public class Configuracion {
     private FileConnection archivo_configuracion;
     private FileConnection carpeta_archivos;
     private InputStream stream_configuracion_entrada;
-    private OutputStream stream_configuracion_salida;
+    //private OutputStream stream_configuracion_salida;
     public String [] raices;//raíces del sistema de archivos del equipo
     //API's disponibles
     public boolean JSR75_disponible=false; //acceso a archivos
     public boolean JSR82_disponible=false; //bluetooth
     public boolean JSR179_disponible=false; //GPS interno
+    public boolean Nokia_DeviceControl_disponible=false; //control de luz
     //variables de configuración propiamente dichas
     public boolean pantalla_completa=false; //arranque
     public float centro_longitud_inicial;//=-1.64f;
@@ -58,6 +59,14 @@ public class Configuracion {
     public int tamaño_cache_mapas=1;
     public boolean acceso_archivos_habilitado=false; //pasa a true si la configuración guardad en RMS's lo permite
     public boolean cache_etiquetas=true;
+    //variables del tracklog
+    public int tamaño_tracklog=10000; //número de puntos guardados en el tracklog
+    public boolean tracklog_activado=true;
+    public boolean guardar_tracklog_salir=true; //true para que el tracklog se mantenga entre ejecución y ejecución
+    public boolean recoger_cellid=true; //true si añade al tracklog la información de repetidores
+    public boolean tracklog_visible=true; //true para que aparezca en tracklog en pantalla
+    
+    
     public final boolean depuracion=false; //true para pruebas
     
     /** Creates a new instance of Configuracion */
@@ -69,24 +78,25 @@ public class Configuracion {
             JSR75_disponible=true;
         }
         //averigua si está disponible el bluetooth
-        cadena=System.getProperty("bluetooth.api.version");
-        if (cadena!=null) {
+        try {
+            Class.forName("javax.bluetooth.LocalDevice");
             JSR82_disponible=true;
-        } else { 
-            try {
-                if (javax.bluetooth.LocalDevice.getProperty("bluetooth.api.version")!=null) JSR82_disponible=true;
-            } catch (Exception ex) {
-                
-            }
+        } catch(ClassNotFoundException ex) {
+            System.out.println("Bluetooth is not supported");
+            JSR82_disponible=false;
         }
         //averigua si está disponible el GPS interno
         cadena=System.getProperty("microedition.location.version");
         if (cadena!=null) {
             JSR179_disponible=true;
         }
-        
-        
-        
+        //averigua si está disponible el objeto DeviceControl, de la librería de Nokia
+        try {  
+            Class.forName("com.nokia.mid.ui.DeviceControl");
+            Nokia_DeviceControl_disponible=true;
+        } catch(Exception ex2){
+            Nokia_DeviceControl_disponible=false;
+        }     
         estado=this.Estado_Pendiente_Leer_Configuracion; //listo para cargar archivo de configuración
     }
     public int inicializar() {
@@ -157,15 +167,20 @@ public class Configuracion {
         this.pantalla_completa=false;
         if (this.JSR179_disponible==true) {
             this.GPS_url="jsr179";
+            //this.GPS_url="btspp://00027815ECBB:1;authenticate=false;encrypt=false;master=true";
+            //this.GPS_url="virtual";
         } else {
             this.GPS_url="";
+            //this.GPS_url="btspp://00027815ECBB:1;authenticate=false;encrypt=false;master=true";
         }
-        
+        //this.acceso_archivos_habilitado=true;
+        //this.ruta_carpeta_archivos="file://localhost/e:/mario/";
         this.tamaño_cache_mapas=1;
-        
-        
-        
-        
+        this.tracklog_activado=false;
+        this.guardar_tracklog_salir=false;
+        this.recoger_cellid=false;
+        this.tracklog_visible=false;
+        this.tamaño_tracklog=500;
     }
     
     private int procesar_configuracion(String [] nombres_parametros,String [] valores_parametros) {
@@ -203,6 +218,32 @@ public class Configuracion {
                         } else return 1; //error en el proceso
                     } else if (nombres_parametros[contador].compareTo("EXTERNAL DATA FOLDER")==0) {
                         this.ruta_carpeta_archivos=valores_parametros[contador];
+                    }  else if (nombres_parametros[contador].compareTo("TRACKLOG ENABLED")==0) {
+                        if (valores_parametros[contador].compareTo("true")==0) {
+                            this.tracklog_activado=true;
+                        } else if (valores_parametros[contador].compareTo("false")==0) {
+                            this.tracklog_activado=false;
+                        } else return 1; //error en el proceso
+                    } else if (nombres_parametros[contador].compareTo("SAVE TRACKLOG ON EXIT")==0) {
+                        if (valores_parametros[contador].compareTo("true")==0) {
+                            this.guardar_tracklog_salir=true;
+                        } else if (valores_parametros[contador].compareTo("false")==0) {
+                            this.guardar_tracklog_salir=false;
+                        } else return 1; //error en el proceso
+                    } else if (nombres_parametros[contador].compareTo("TRACKLOG VISIBLE")==0) {
+                        if (valores_parametros[contador].compareTo("true")==0) {
+                            this.tracklog_visible=true;
+                        } else if (valores_parametros[contador].compareTo("false")==0) {
+                            this.tracklog_visible=false;
+                        } else return 1; //error en el proceso
+                    } else if (nombres_parametros[contador].compareTo("COLLECT CELLID")==0) {
+                        if (valores_parametros[contador].compareTo("true")==0) {
+                            this.recoger_cellid=true;
+                        } else if (valores_parametros[contador].compareTo("false")==0) {
+                            this.recoger_cellid=false;
+                        } else return 1; //error en el proceso
+                    } else if (nombres_parametros[contador].compareTo("TRACKLOG SIZE")==0) {
+                        this.tamaño_tracklog=Integer.valueOf(valores_parametros[contador]).intValue();
                     }
                 }
             }
@@ -291,6 +332,36 @@ public class Configuracion {
             cadena="OVERVIEW MAP DETAIL="+new Integer(this.detalle_minimo_mapa_general).toString();
             registros.addRecord(cadena.getBytes(),0,cadena.length());
             cadena="MAPS CACHE SIZE="+new Integer(this.tamaño_cache_mapas).toString();
+            registros.addRecord(cadena.getBytes(),0,cadena.length());
+            cadena="TRACKLOG ENABLED=";
+            if (this.tracklog_activado==true) {
+                cadena+="true";
+            } else {
+                cadena+="false";
+            }
+            registros.addRecord(cadena.getBytes(),0,cadena.length());
+            cadena="SAVE TRACKLOG ON EXIT=";
+            if (this.guardar_tracklog_salir==true) {
+                cadena+="true";
+            } else {
+                cadena+="false";
+            }
+            registros.addRecord(cadena.getBytes(),0,cadena.length());
+            cadena="TRACKLOG VISIBLE=";
+            if (this.tracklog_visible==true) {
+                cadena+="true";
+            } else {
+                cadena+="false";
+            }
+            registros.addRecord(cadena.getBytes(),0,cadena.length());
+            cadena="COLLECT CELLID=";
+            if (this.recoger_cellid==true) {
+                cadena+="true";
+            } else {
+                cadena+="false";
+            }            
+            registros.addRecord(cadena.getBytes(),0,cadena.length());
+            cadena="TRACKLOG SIZE="+new Integer(this.tamaño_tracklog).toString();
             registros.addRecord(cadena.getBytes(),0,cadena.length());
             registros.closeRecordStore();
             this.estado=this.Estado_OK; //listo para funcionar

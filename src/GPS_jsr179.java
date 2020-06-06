@@ -1,4 +1,6 @@
-import javax.microedition.location.*;
+//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//# import javax.microedition.location.*;
+//#endif
 /*
  * GPS_jsr179.java
  *
@@ -12,51 +14,82 @@ import javax.microedition.location.*;
  *
  * @author javier
  */
-public class GPS_jsr179 implements LocationListener{
+//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//# public class GPS_jsr179 implements LocationListener,Runnable{
+//#else
+public class GPS_jsr179 {
+//#endif
     //public class GPS_jsr179 {
     //gestión de coordenadas a través de JSR179
-    LocationProvider provider;
+//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#     LocationProvider provider;
+//#endif
     public float latitud;
     public float longitud;
-    public boolean navegando=false;
+    public int velocidad;
+    public int rumbo;
+    public int estado;
+    public int altura;
+    public String ultimo_error;
+    private Gestor_GPS gestor_gps;
+    private Thread t; //tarea para actualización de coordenadas, en secundario
     
     /** Creates a new instance of GPS_jsr179 */
-    public GPS_jsr179() {
+    public GPS_jsr179(Gestor_GPS gestor_gps) {
+        this.gestor_gps=gestor_gps;
     }
     
     public int iniciar() {
-        try {
-            provider = LocationProvider.getInstance(null);
-            provider.setLocationListener(this, -1, -1, -1); 
-        } catch (LocationException ex) {
-            ex.printStackTrace();
-            return 1; //error la inicialización
-        } 
+//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#         estado=gestor_gps.estado_GPS_OFF;
+//#         try {
+//#             provider = LocationProvider.getInstance(null);
+//#             provider.setLocationListener(this, -1, -1, -1); 
+//#         } catch (LocationException ex) {
+//#             ex.printStackTrace();
+//#             ultimo_error=ex.toString();
+//#             estado=gestor_gps.estado_GPS_Error;
+//#             return 1; //error en la inicialización
+//#         } 
+//#endif
         return 0; //GPS interno arrancado
         
     }
     public void terminar() {
-        //quita la callback 
-        provider.setLocationListener(null,-1,-1,-1);
-        provider=null; 
+//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#         //quita la callback 
+//#         provider.reset();
+//#         provider.setLocationListener(null,-1,-1,-1);
+//#         provider=null; 
+//#         estado=gestor_gps.estado_GPS_OFF;
+//#endif
     }
-    public void locationUpdated(LocationProvider provider, Location location) {
-        if (location.isValid()) {
-            QualifiedCoordinates coordenadas;
-            coordenadas=location.getQualifiedCoordinates();
-            longitud=(float)coordenadas.getLongitude();
-            latitud=(float)coordenadas.getLatitude(); 
-            navegando=true; 
-        } else {
-            navegando=false;
-        }
-        
-  
-    }
-    
-    
-    public void providerStateChanged(LocationProvider provider, int newState) {
-        
-    } 
+//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#     public void locationUpdated(LocationProvider provider, Location location) {
+//#         if (location.isValid()) {
+//#             QualifiedCoordinates coordenadas;
+//#             coordenadas=location.getQualifiedCoordinates();
+//#             longitud=(float)coordenadas.getLongitude();
+//#             latitud=(float)coordenadas.getLatitude(); 
+//#             altura=(int)coordenadas.getAltitude();
+//#             velocidad=(int)location.getSpeed();
+//#             rumbo=(int)location.getCourse();
+//#             estado=gestor_gps.estado_GPS_ON_Listo;
+//#         } else {
+//#             estado=gestor_gps.estado_GPS_OK_No_Listo;
+//#         }
+//#         t=new Thread(this);
+//#         t.start(); //avisa al objeto padre de que hay nuevas coordenadas disponibles 
+//#     }
+//#     
+//#     
+//#     public void providerStateChanged(LocationProvider provider, int newState) {
+//#         
+//#     } 
+//# 
+//#     public void run() {
+//#         gestor_gps.notificar_evento_GPS_interno();
+//#     }
+//#endif
     
 }

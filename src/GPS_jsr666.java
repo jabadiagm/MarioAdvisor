@@ -1,3 +1,4 @@
+
 /*
  * GPS_jsr666.java
  *
@@ -15,10 +16,14 @@ public class GPS_jsr666 {
     //sucedáneo de GPS_jsr179
     public float latitud;
     public float longitud;
-    public boolean navegando=false;
+    public int velocidad;
+    public int rumbo;
+    public int altura;
+    public int estado;
+    public String ultimo_error;
     
     /** Creates a new instance of GPS_jsr179 */
-    public GPS_jsr666() {
+    public GPS_jsr666(Gestor_GPS gestor_gps) {
     }
     
     public int iniciar() {

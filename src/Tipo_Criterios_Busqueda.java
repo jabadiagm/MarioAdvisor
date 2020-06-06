@@ -23,15 +23,20 @@ public class Tipo_Criterios_Busqueda {
     public boolean ordenar_por_distancia; //forma de ordenar los resultados
     public int tipo_busqueda; //elementos a buscar
     public boolean incluir_tipo; //si es false, busca cualquier elemento. si es true, busca sólo los que tengal el tipo indicado
-    
+    public float longitud; //coordenadas del punto respecto del cual se busca (búsquedas por distancia)
+    public float latitud;
+    public int radio_busqueda; //distancia máxima en km al origen de búsqueda
     
     /** Creates a new instance of Tipo_Criterios_Busqueda */
-    public Tipo_Criterios_Busqueda(int tipo,String texto,boolean ordenar_por_distancia,int tipo_busqueda,boolean incluir_tipo) {
+    public Tipo_Criterios_Busqueda(int tipo,String texto,boolean ordenar_por_distancia,int tipo_busqueda,boolean incluir_tipo,float longitud,float latitud,int radio_busqueda) {
         this.tipo=tipo;
         this.texto=texto;
         this.ordenar_por_distancia=ordenar_por_distancia;
         this.tipo_busqueda=tipo_busqueda;
         this.incluir_tipo=incluir_tipo;
+        this.longitud=longitud;
+        this.latitud=latitud;
+        this.radio_busqueda=radio_busqueda;
     }
     
 }
