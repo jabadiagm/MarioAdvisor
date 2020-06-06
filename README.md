@@ -1,4 +1,4 @@
-# MarioAdvisor
+# Mario Advisor
 Visor de mapas .img de Garmin en J2ME
 
 ![Pantallazo](/Pantallazo.gif)
