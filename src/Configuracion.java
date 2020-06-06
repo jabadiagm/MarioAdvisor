@@ -161,7 +161,7 @@ public class Configuracion {
         //define unos valores iniciales por si no existe un archivo de configuración
         this.centro_longitud_inicial=0;
         this.centro_latitud_inicial=0;
-        this.nivel_zoom_inicial=10;
+        this.nivel_zoom_inicial=24;
         this.detalle_minimo_mapa_general=3;
         this.factor_mapa=2;
         this.pantalla_completa=false;
@@ -172,10 +172,11 @@ public class Configuracion {
         } else {
             this.GPS_url="";
             //this.GPS_url="btspp://00027815ECBB:1;authenticate=false;encrypt=false;master=true";
+            //this.GPS_url="hge100";
         }
         //this.acceso_archivos_habilitado=true;
         //this.ruta_carpeta_archivos="file://localhost/e:/mario/";
-        this.tamaño_cache_mapas=1;
+        this.tamaño_cache_mapas=2;
         this.tracklog_activado=false;
         this.guardar_tracklog_salir=false;
         this.recoger_cellid=false;

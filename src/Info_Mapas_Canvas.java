@@ -56,9 +56,11 @@ public class Info_Mapas_Canvas implements ItemStateListener,CommandListener{
         for (contador=0;contador<gestor_mapas.lista_mapas.length;contador++) {
             cadena=extraer_nombre_mapa(gestor_mapas.lista_mapas[contador]);
             if (gestor_mapas.mapa_valido[contador]==false) { //mapa no legible
-                cadena+="(failed)";
+                cadena+="-failed";
             } else { //si el mapa es válido, se añade su descripción
-                cadena+=" ("+gestor_mapas.descripcion_mapa[contador].trim()+")";
+                cadena+="-";
+                if (gestor_mapas.mapa_general[contador]==true) cadena+="(g) ";
+                cadena+=gestor_mapas.descripcion_mapa[contador].trim();
             }
             resultado[contador]=cadena;
         }

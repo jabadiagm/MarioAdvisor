@@ -108,14 +108,17 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
     private int [] rasgado_polilineas={Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.DOTTED,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,
     Graphics.DOTTED,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.DOTTED,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,
     Graphics.DOTTED,Graphics.SOLID,Graphics.SOLID,Graphics.DOTTED,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.SOLID,Graphics.DOTTED,Graphics.SOLID};
+    private boolean terminar=false;
+    private boolean terminado=false;
     private int nose=0;
 
     
     /** Creates a new instance of IMG_Canvas */
-    public IMG_Canvas(Visor_IMG m, Configuracion config,Tracklog tracklog) {
+    public IMG_Canvas(Visor_IMG m,Gestor_Mapas gestor_mapas, Configuracion config,Tracklog tracklog) {
         super(false); //permite el procesador de todas las teclas en keyPressed/keyReleased...
         configuracion=config;
         this.tracklog=tracklog;
+        this.gestor_mapas=gestor_mapas;
         midlet=m;
     }
     public void ajustar_parametros_pantalla() {
@@ -159,7 +162,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         fuente_mediana=Font.getFont(Font.FACE_SYSTEM,Font.STYLE_PLAIN,Font.SIZE_MEDIUM);
         fuente_grande=Font.getFont(Font.FACE_SYSTEM,Font.STYLE_PLAIN,Font.SIZE_LARGE);
         g=this.getGraphics();
-        gestor_mapas=new Gestor_Mapas(configuracion.ruta_carpeta_archivos,g,this,configuracion.detalle_minimo_mapa_general,configuracion.tamaño_cache_mapas,fuente_grande,configuracion.cache_etiquetas,configuracion.acceso_archivos_habilitado);
+        //gastor_mapas=new Gestor_Mapas(configuracion.ruta_carpeta_archivos,g,this,configuracion.detalle_minimo_mapa_general,configuracion.tamaño_cache_mapas,fuente_grande,configuracion.cache_etiquetas,configuracion.acceso_archivos_habilitado);
         //si se ha cargado la configuración por defecto, lon y lat valen cero.
         //entonces, se coloca la posición sugerida por gestor_mapas
         if (configuracion.centro_latitud_inicial==0 && configuracion.centro_longitud_inicial==0) {
@@ -293,7 +296,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         regenerar_mapa(nivel_zoom,true);
         redibujar=true;
         boolean parate=false;
-        while(true){
+        while(terminar==false){
             //while (pausar==true)
             while (midlet.pantalla.getCurrent()!=this) //si el IMG_canvas no está en pantalla, espera
                 try {t.sleep(100);
@@ -369,7 +372,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
                     tiempo_FIRE_pulsada=System.currentTimeMillis(); //guarda el instante en que se pulsa
                     tecla_FIRE_pulsada=true;
                 } else { //lleva un rato pulsada. si pasa de 1 seg., hace zoom out
-                    if (System.currentTimeMillis()-tiempo_FIRE_pulsada>1000) { //pulsación larga, zoom-
+                    if (System.currentTimeMillis()-tiempo_FIRE_pulsada>500) { //pulsación larga, zoom-
                         if (nivel_zoom<(zoom.length-1)) {
                             redibujar=true;
                             regenerar_mapa(++nivel_zoom,false);
@@ -432,15 +435,16 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
             try {
                 
                 if (navegacion_GPS_on==false) { //si el control es manual...
-                    t.sleep(5); //... interesa poder redibujar rápido
+                    t.sleep(7); //... interesa poder redibujar rápido
                 } else { //si el control es automático...
-                    t.sleep(5);  //...interesa dejar tiempo a las tareas que corren en secundario
+                    t.sleep(7);  //...interesa dejar tiempo a las tareas que corren en secundario
                 }
                 
             } catch (InterruptedException ex) {
                 ex.printStackTrace();
             }
         }
+        terminado=true;
     }
     private void regenerar_pantalla() {
         //coloca el mapa en pantalla, junto con el resto de elementos visibles
@@ -485,27 +489,29 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         }
         dibujar_escala(g,0.08f,0.3f);
         //si no hay mapas lo avisa en la línea de estado
-        if (mapas==null) dibujar_linea_estado("No Map Data available.",fuente_mediana);
-        if (configuracion.depuracion==true) {
-            g.drawString(new Integer(nivel_zoom).toString(),10,10,0);
-            g.drawString((new Long(tiempo).toString()),10,20,0);
-        }
-        
+        if (mapas==null) dibujar_linea_estado("No Map Data Available.",fuente_mediana);
         if (configuracion.depuracion==true && mapas!=null) { //información adicional
-            contador2=40; //coordenada y a partir de la cual se sigue escribiendo
+            g.drawString(new Integer(nivel_zoom).toString(),10,10,0);
+            g.drawString((new Long(tiempo).toString()),10,20,0);            contador2=40; //coordenada y a partir de la cual se sigue escribiendo
             g.setColor(0);
             for (contador=0;contador<mapas.length;contador++) {
                 if (mapas[contador]!=null) {
                     g.drawString(mapas[contador].nombre_archivo+"("+mapas[contador].descripcion+")",20,contador2,0);
-                    contador2+=10;
+                    contador2+=12;
+                    contador2+=12;
                 }
                 
             }
             if (gestor_GPS!=null) {
-                g.drawString( new Integer(gestor_GPS.velocidad).toString(),20,contador2,0);
-                contador2+=10;
-                g.drawString( new Integer(gestor_GPS.rumbo).toString(),20,contador2,0);
-                contador2+=10;
+                g.drawString( new Integer(gestor_GPS.velocidad).toString(),30,contador2,0);
+                contador2+=12;
+                g.drawString( new Integer(gestor_GPS.rumbo).toString(),30,contador2,0);
+                contador2+=12;
+                if (gestor_GPS.log_NMEA!=null) {
+                    g.drawString( gestor_GPS.log_NMEA,30,contador2,0);
+                    contador2+=12;
+                }
+
             }
         }
         
@@ -700,11 +706,13 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
                 mapas[contador]=null;
             }
         }
-        //System.gc();
+        System.gc();
     }
     public void regenerar_mapa_publico(double longitud,double latitud,int nivel_zoom) {
         //centra el mapa en una posición indicada desde fuera del objeto. pensado para usar en las búsquedas
-        //centra la nueva posición
+        //centra la nueva posición. si el gps está conectado, desconecta la navegación automática, para que 
+        //la vista no se mueva
+        if (navegacion_GPS_on==true) navegacion_manual=true; 
         centro_pantalla_Lon=longitud;
         centro_pantalla_Lat=latitud;
         regenerar_mapa(nivel_zoom,false);
@@ -877,7 +885,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         y=(int)((scaletop-punto.latitud)*escala_Y);
         //graphics_lienzo.drawArc(x,y,5,5,0,360);
         dibujar_icono(x,y,propiedades.indice);
-        if (punto.etiqueta!=null || punto.es_POI==true) { //si hay alguna etiqueta definida, ya sea normal o de POI
+        if (punto.etiqueta!=null ||  punto.etiqueta_POI!=null) { //si hay alguna etiqueta definida, ya sea normal o de POI
             if (indexado==true) {
                 if (punto.es_POI==false) { //según sea POI o no, la etiqueta se guarda en un situo u otro
                     gestor_etiquetas.añadir_etiqueta(punto.etiqueta.nombre_completo,x+1,y+1,fuente_pequeña,gestor_etiquetas.TIPO_PUNTO_INDEXADO,0);
@@ -911,7 +919,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         int xmin=0,xmax=0,ymin=0,ymax=0; //límites de la polilínea, en píxeles
         int distancia=0; //suma de componentes vertical y horizontal de los segmentos que formal la polilinea
         String cadena="";
-        //reserva espacio para las cooredenas en píxeles
+        //reserva espacio para las coordenadas en píxeles
         x=new int [polilinea.puntos_X.length];
         y=new int [polilinea.puntos_Y.length];
         if (polilinea.tipo==6){ //el bucle incluye cálculo de límites para ver si la etiqueta cabe
@@ -996,17 +1004,21 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         //caracteres de control [0x2d], [0x2e] y [0x2f]
         //la polilínea de tipo calle se procesa en dibujar_polilinea, por ser un caso especial
         String cadena;
-        if (texto.indexOf("[0x2e]")!=-1 || texto.indexOf("[0x2f]")!=-1) {//carretera general
+        if (texto.indexOf("[0x2e]")!=-1 || texto.indexOf("[0x2f]")!=-1 || texto.indexOf("[0x2c]")!=-1) {//carretera general
             cadena=quitar_texto_cadena(texto,"[0x2e]");
             cadena=quitar_texto_cadena(cadena,"[0x2f]");
+            cadena=quitar_texto_cadena(cadena,"[0x2c]");
             gestor_etiquetas.añadir_etiqueta(cadena,x,y,fuente,gestor_etiquetas.TIPO_CARRETERA,0);
             return;
         }
-        if (texto.indexOf("[0x2d")!=-1 ) {//autopista
+        if (texto.indexOf("[0x2d")!=-1 || texto.indexOf("[0x2a]")!=-1 || texto.indexOf("[0x2b]")!=-1) {//autopista
             cadena=quitar_texto_cadena(texto,"[0x2d]");
+            cadena=quitar_texto_cadena(cadena,"[0x2a]");
+            cadena=quitar_texto_cadena(cadena,"[0x2b]");
             gestor_etiquetas.añadir_etiqueta(cadena,x,y,fuente,gestor_etiquetas.TIPO_AUTOPISTA,0);
             return;
         }
+        
         //si se ha llegado hasta aquí, se trata de una polilínea general
         gestor_etiquetas.añadir_etiqueta(texto,x,y,fuente,gestor_etiquetas.TIPO_POLILINEA,0);
         
@@ -1150,5 +1162,17 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
             gestor_etiquetas.dibujar_etiquetas(graphics_lienzo);
             //System.gc();
         }
+    }
+    public void cerrar() {
+        //anula los objetos principales, para reiniciar
+        terminar=true;
+        //while (terminado==false);
+        graphics_lienzo=null;
+        gestor_mapas=null;
+        if (gestor_GPS!=null) { //puede haber un GPS funcionando
+            if (gestor_GPS.estado!=Gestor_GPS.estado_GPS_OFF) gestor_GPS.desconectar();
+            gestor_GPS=null;
+        }
+        
     }
 }

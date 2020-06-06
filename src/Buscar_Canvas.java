@@ -36,6 +36,8 @@ public class Buscar_Canvas implements ItemStateListener,CommandListener{
     //coordenadas actuales, para búsquedas por distancia
     private float longitud_actual;
     private float latitud_actual;
+    
+    private Tipo_Resultado_Busqueda resultado;
     public Buscar_Canvas(Visor_IMG midlet,Gestor_Mapas gestor_mapas,IMG_Canvas img_canvas)  {
         this.midlet=midlet;
         this.gestor_mapas=gestor_mapas;
@@ -91,13 +93,16 @@ public class Buscar_Canvas implements ItemStateListener,CommandListener{
                 while (busqueda.estado!=Tipo_Busqueda.estado_inactivo);
             }
             int contador; //índice del elemento seleccionado
-            Tipo_Resultado_Busqueda resultado;
+            //Tipo_Resultado_Busqueda resultado;
             for (contador=0;contador<ch_resultados.size();contador++){
                 if (ch_resultados.isSelected(contador)==true) break; //elemento selccionado encontrado. sólo debería haber uno
             }
             resultado=(Tipo_Resultado_Busqueda) busqueda.resultados_busqueda.elementAt(contador);
-            midlet.mostrar_img_canvas_con_cambio_coordenadas(resultado.longitud,resultado.latitud,5);
-            
+            new Thread(new Runnable() {
+                public void run() {
+                    midlet.mostrar_img_canvas_con_cambio_coordenadas(resultado.longitud,resultado.latitud,5);
+                }
+            }).start();
         }
     }
 
@@ -213,9 +218,10 @@ public class Buscar_Canvas implements ItemStateListener,CommandListener{
             colocar_linea_estado ("No Results Found.");
             return;
         }
-        colocar_linea_estado ("Searching. "+new Integer(resultados.size()).toString()+" Found"); //cuenta el número de resuldados
+        colocar_linea_estado ("Searching. "+new Integer(resultados.size()).toString()+" Found"); //cuenta el número de resultados
         //si hay valores validos en el vector de entrada, los coloca
         for (contador=0;contador<resultados.size();contador++) {
+            if (ch_resultados.size()>255) break; //parche para que funcione en sony ericsson
             distancia=((Tipo_Resultado_Busqueda)resultados.elementAt(contador)).distancia;
             //ajusta el formato de la distancia
             if (distancia>=100) { //sólo la parte entera

@@ -38,6 +38,7 @@ public class Gestor_GPS implements Runnable{
     public int rumbo;
     public int altura;
     public String ultimo_error;
+    public String log_NMEA; //cadena NMEA del GPS
     
 
     //variables privadas
@@ -129,7 +130,14 @@ public class Gestor_GPS implements Runnable{
         this.altura=gps_interno.altura;
         if (estado==Gestor_GPS.estado_GPS_ON_Listo) crear_posicion_y_notificar(); //actualiza el tracklog
     }
-
+    public void notificar_error(String cadena_error) {
+        //usado por los objetos de control de los GPS para avisar de que se ha producido un error
+        this.ultimo_error=cadena_error;
+        this.estado=Gestor_GPS.estado_GPS_Error;
+    }
+    public void notificar_NMEA(String cadena) {
+        log_NMEA=cadena;
+    }
     public void run() {
         //gestión del GPS virtual. por ahora, sólo para depuración
         this.estado=this.estado_GPS_ON_Listo;

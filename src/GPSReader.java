@@ -46,6 +46,10 @@ public class GPSReader implements Runnable{
     
     public static String TYPE=""; // Used for debugging.
     private String exc = ""; // Used for debugging.
+    private StreamConnection conn = null;
+    private InputStream is = null;
+    private OutputStream os=null; //usada para arrancar el HGE-100
+    boolean hge100=false; //si la url indicada es "hge100", se usará la conexión serie y la cadena de conexión del hge-100
     
     // Array used to interpolate the speed.
     private String []sp = new String[9];
@@ -91,21 +95,34 @@ public class GPSReader implements Runnable{
         if (estado==Gestor_GPS.estado_GPS_OK_No_Listo || estado==Gestor_GPS.estado_GPS_ON_Listo) {
             terminar=true;
             while (terminar==true); //espera a que se cierre la tarea run
+            if (hge100==true) {
+                
+            }
             estado=gestor_GPS.estado_GPS_OFF;
         }
     }
     public void run() {
         
-        StreamConnection conn = null;
-        InputStream is = null;
         String err = ""; // used for debugging
         String cadena;
+        String hge100_url="comm:AT5;baudrate=9600";
         float valor_float;
         float [] resultado=new float[2];
+        
+        if (url.toLowerCase().compareTo("hge100")==0) { //conexión con el módem hge-100 de sony
+            url=hge100_url;
+            hge100=true;
+        }
         try{
             String []data;
             conn = (StreamConnection)Connector.open(url);
             is = conn.openInputStream();
+            //si es el hge-100, hay que activar la salida de datos
+            if (hge100==true) {
+                os=conn.openOutputStream();
+                String strSta = "$STA\r\n";
+                os.write(strSta.getBytes()); // Tell HGE-100 to start transmitting NMEA data
+            }
             estado=Gestor_GPS.estado_GPS_OK_No_Listo;
             
             int i=0;
@@ -123,7 +140,7 @@ public class GPSReader implements Runnable{
                     if(s.length()>5){
                         DATA_STRING = s.substring(5, s.length());
                         TYPE = s.substring(2, 5);
-                        
+                        gestor_GPS.notificar_NMEA(DATA_STRING);
                         // Check the gps data type and convert the information to a more readable format.
                         if(s.substring(0, 5).compareTo("GPGGA") == 0){
                             //data = splitString(",000133.046,,,,,0,00,,,M,0.0,M,,0000*55\r\n$");
@@ -161,6 +178,7 @@ public class GPSReader implements Runnable{
                         }else if(s.substring(0, 5).compareTo("GPRMC") == 0){
                             data = splitString(DATA_STRING);
                             //data = splitString(",123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A\r\n$");
+                            //data = splitString(",210336.00,A,4249.99781,N,00137.76111,W,0.125,81.71,021108,,,A*4A\r\n$");
                             cadena=data[1];
                             if (cadena.compareTo("A")==0) { //medida válida
                                 estado=Gestor_GPS.estado_GPS_ON_Listo;
@@ -240,12 +258,21 @@ public class GPSReader implements Runnable{
             }while(i != -1 && terminar==false);
             terminar=false;
             is.close();
+            if (os!=null) {
+                String cmd = "$STA\r\n";
+                os.write(cmd.getBytes());
+                os.close();
+            }
             conn.close();
+            is=null;
+            os=null;
+            conn=null;
         }catch(Exception e){
             ultimo_error=e.toString();
             err = e.toString();
             System.out.println(e);
             estado=Gestor_GPS.estado_GPS_Error;
+            gestor_GPS.notificar_error(ultimo_error);
         }
         TYPE = "EXITED!! : " + err;
     }

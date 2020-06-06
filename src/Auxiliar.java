@@ -21,7 +21,7 @@ public  class Auxiliar {
     
     /** Creates a new instance of Auxiliar */
     public Auxiliar() {
-        numero_propiedades_puntos=280;
+        numero_propiedades_puntos=277;
         numero_iconos=136;
         int contador=0;
         tipo = new int [numero_propiedades_puntos];
@@ -302,6 +302,7 @@ public  class Auxiliar {
         contador++; tipo[contador] = 0x6616; descripcion[contador] = "Summit"; indice[contador] = 134;
         contador++; tipo[contador] = 0x6617; descripcion[contador] = "Valley"; indice[contador] = 126;
         contador++; tipo[contador] = 0x6618; descripcion[contador] = "Woods"; indice[contador] = 130;
+        contador++; tipo[contador] = 0xffff; descripcion[contador] = "Unknown"; indice[contador] = 6;
         
     }
     public Tipo_Propiedades_Punto leer_propiedades_punto(int tipo) {
@@ -312,6 +313,12 @@ public  class Auxiliar {
         }
         if (contador>0) { //tipo encontrado
             return new Tipo_Propiedades_Punto(this.tipo[contador],descripcion[contador],indice[contador]);
-        } else return null;
+        } else { //tipo no encontrado. si es del tipo xx00 devuelve el tipo desconocido
+            if (tipo%256==0) {
+                return new Tipo_Propiedades_Punto(this.tipo[this.tipo.length-1],descripcion[this.descripcion.length-1],indice[this.indice.length-1]);
+            } else { //si es tel tipo xxyy, devuelve el tipo de su jefe de categoría, el xx00
+                return leer_propiedades_punto(tipo&0xff00);
+            }
+        }
     }
 }

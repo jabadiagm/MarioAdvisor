@@ -1,4 +1,4 @@
-//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#if Pruebas_JSR179 | JSR75_JSR82_JSR179 | JSR75_JSR82_JSR179_Halmer
 //# import javax.microedition.location.*;
 //#endif
 /*
@@ -14,14 +14,14 @@
  *
  * @author javier
  */
-//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#if Pruebas_JSR179 | JSR75_JSR82_JSR179 | JSR75_JSR82_JSR179_Halmer
 //# public class GPS_jsr179 implements LocationListener,Runnable{
 //#else
 public class GPS_jsr179 {
 //#endif
     //public class GPS_jsr179 {
     //gestión de coordenadas a través de JSR179
-//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#if Pruebas_JSR179 | JSR75_JSR82_JSR179 | JSR75_JSR82_JSR179_Halmer
 //#     LocationProvider provider;
 //#endif
     public float latitud;
@@ -40,7 +40,7 @@ public class GPS_jsr179 {
     }
     
     public int iniciar() {
-//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#if Pruebas_JSR179 | JSR75_JSR82_JSR179 | JSR75_JSR82_JSR179_Halmer
 //#         estado=gestor_gps.estado_GPS_OFF;
 //#         try {
 //#             provider = LocationProvider.getInstance(null);
@@ -56,7 +56,7 @@ public class GPS_jsr179 {
         
     }
     public void terminar() {
-//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#if Pruebas_JSR179 | JSR75_JSR82_JSR179 | JSR75_JSR82_JSR179_Halmer
 //#         //quita la callback 
 //#         provider.reset();
 //#         provider.setLocationListener(null,-1,-1,-1);
@@ -64,7 +64,7 @@ public class GPS_jsr179 {
 //#         estado=gestor_gps.estado_GPS_OFF;
 //#endif
     }
-//#if Nokia | Mario_Sin_Firmar | Sun_Java | JSR75_JSR82_JSR179
+//#if Pruebas_JSR179 | JSR75_JSR82_JSR179 | JSR75_JSR82_JSR179_Halmer
 //#     public void locationUpdated(LocationProvider provider, Location location) {
 //#         if (location.isValid()) {
 //#             QualifiedCoordinates coordenadas;

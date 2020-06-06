@@ -17,6 +17,7 @@ import javax.microedition.lcdui.*;
 public class Visor_IMG extends MIDlet  {
     //elementos visuales del mislet
     public Display pantalla;
+    private Gestor_Mapas gestor_mapas;
     private IMG_Canvas img_Canvas;
     private Configuracion configuracion;
     private Config_Canvas config_canvas;
@@ -35,7 +36,7 @@ public class Visor_IMG extends MIDlet  {
     
     /** Creates a new instance of Visor_IMG */
     public Visor_IMG() {
-        pantalla=getDisplay();
+        pantalla=this.getDisplay();
         configuracion=new Configuracion();
         //formulario_carpeta=new Form("Select Program Folder");
         //seleccion_raiz=new ChoiceGroup("Roots",ChoiceGroup.EXCLUSIVE);
@@ -115,13 +116,35 @@ public class Visor_IMG extends MIDlet  {
             img_Canvas=null;
             System.gc();
         }
-        img_Canvas=new IMG_Canvas(this,configuracion,tracklog);
-        pantalla.setCurrent(img_Canvas);
+        gestor_mapas=new Gestor_Mapas(configuracion.ruta_carpeta_archivos,pantalla,configuracion.detalle_minimo_mapa_general,configuracion.tamaño_cache_mapas,configuracion.cache_etiquetas,configuracion.acceso_archivos_habilitado);
+        img_Canvas=new IMG_Canvas(this,gestor_mapas,configuracion,tracklog);
         img_Canvas.inicializar(); 
+        pantalla.setCurrent(img_Canvas);
+    }
+    public void reiniciar() {
+        //crea un nuevo objeto img_canvas
+        if (config_canvas!=null) config_canvas=null; //si se viene del formulario de configuración se borra
+        if (img_Canvas!=null) {
+            img_Canvas.cerrar(); //cierra los objetos principales
+            img_Canvas=null;
+            gestor_mapas=null;
+            System.gc();
+            gestor_mapas=new Gestor_Mapas(configuracion.ruta_carpeta_archivos,pantalla,configuracion.detalle_minimo_mapa_general,configuracion.tamaño_cache_mapas,configuracion.cache_etiquetas,configuracion.acceso_archivos_habilitado);
+            img_Canvas=new IMG_Canvas(this,gestor_mapas,configuracion,tracklog);
+            pantalla.setCurrent(img_Canvas);
+            img_Canvas.inicializar();
+        }
+        
     }
     public void ajustar_parametros_pantalla() {
         //acceso a la función ajustar_parametros_pantalla del objeto img_canvas
+        Displayable display_anterior;
+        display_anterior=pantalla.getCurrent();
+        pantalla.setCurrent(img_Canvas);
+        img_Canvas.flushGraphics();
+        if (configuracion.pantalla_completa==true) img_Canvas.setFullScreenMode(true);
         img_Canvas.ajustar_parametros_pantalla();
+        pantalla.setCurrent(display_anterior);
     }
     public void inicializar_tracklog() {
         //crea el objeto tracklog o nó, según lo que diga la configuración
@@ -161,7 +184,7 @@ public class Visor_IMG extends MIDlet  {
         pantalla.setCurrent(img_Canvas);
         //al volver de algún formulacio deja de ir a pantalla completa. se le hace ir manualmente
         if (configuracion.pantalla_completa==true) img_Canvas.setFullScreenMode(true);
-        img_Canvas.regenerar_mapa_publico(longitud,latitud,6);
+        img_Canvas.regenerar_mapa_publico(longitud,latitud,nivel_zoom);
     }
     public void regenerar_mapa() {
         //regenera el mapa actual en la posición  actual con el zoom actual. pensado para cambios del lienzo

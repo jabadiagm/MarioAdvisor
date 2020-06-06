@@ -155,7 +155,7 @@ public class BTConnector implements Runnable, DiscoveryListener {
 
     // When a connection is made and a service is found, get the connection string to that service.
     public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {
-        url = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, true);
+        url = servRecord[0].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, false);
         System.out.println("url: " + url);
     }
 

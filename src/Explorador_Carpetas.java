@@ -107,7 +107,9 @@ public class Explorador_Carpetas  implements CommandListener{
                     browser.append(fileName, dirIcon);
                 } else {
                     // this is regular file
-                    //browser.append(fileName, fileIcon);
+                    if (browser.size()<255) { //corta a partir de 255, por el bug de los sony ericsson
+                        browser.append(fileName, fileIcon);
+                    }
                 }
             }
             

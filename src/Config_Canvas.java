@@ -32,7 +32,8 @@ public class Config_Canvas implements ItemStateListener,CommandListener{
     //objetos externos
     private Configuracion configuracion;
     private Visor_IMG midlet;
-    
+    //pegote para reiniciar
+    private boolean reiniciar=false;
     
     /** Creates a new instance of Config_Canvas */
     public Config_Canvas(Configuracion config,Visor_IMG Midlet) {
@@ -109,7 +110,16 @@ public class Config_Canvas implements ItemStateListener,CommandListener{
     public void commandAction(Command command, Displayable displayable) {
         
         if (command==cmd_atras) {
-            midlet.mostrar_img_canvas();
+            if (reiniciar==false) {
+                midlet.mostrar_img_canvas();
+            } else {
+                new Thread(new Runnable() {
+                    public void run() {
+                        midlet.reiniciar();
+                    }
+                }).start();
+            }
+            
         } else if (command==cmd_guardar) {
             int valor_int;
             String cadena;
@@ -209,8 +219,8 @@ public class Config_Canvas implements ItemStateListener,CommandListener{
                 //necesitan algún ajuste y otros no necesitan nada
                 //opciones que afectan a la visualización
                 if (factor_mapa_antiguo!=configuracion.factor_mapa) { //cambio de tamaño del lienzo
-                    midlet.ajustar_parametros_pantalla();
-                    midlet.regenerar_mapa();
+                    //midlet.ajustar_parametros_pantalla();
+                    //midlet.regenerar_mapa();
                 }
                 //opciones del tracklog
                 if (tracklog_activado_antiguo!=configuracion.tracklog_activado || guardar_tracklog_salir_antiguo!=configuracion.guardar_tracklog_salir || recoger_cellid_antiguo!=configuracion.recoger_cellid ||tamaño_tracklog_antiguo!=configuracion.tamaño_tracklog) {
@@ -220,8 +230,10 @@ public class Config_Canvas implements ItemStateListener,CommandListener{
                 if (detalle_minimo_mapa_general_antiguo!=configuracion.detalle_minimo_mapa_general || 
                         tamaño_cache_mapas_antiguo!=configuracion.tamaño_cache_mapas || 
                         acceso_archivos_habilitado_antiguo!=configuracion.acceso_archivos_habilitado || 
+                        factor_mapa_antiguo!=configuracion.factor_mapa ||
                         ruta_acceso_externo_antigua.compareTo(configuracion.ruta_carpeta_archivos)!=0) { //por ahora hay que reiniciar para que esto funcione
-                    midlet.mensaje_advertencia("You must restart for changes to take effect.");
+                    //midlet.mensaje_advertencia("You must restart for changes to take effect.");
+                    reiniciar=true; //al volver, reinicia el programa para que tome los cambios
                 }
 
             }

@@ -49,6 +49,8 @@ public class IMG_Parser {
     private boolean mapa_interno; //cuando es interno no se usa la variable archivo_IMG
     private Class clase; //acceso a los archivos del jar
     Tipo_Cache_Etiquetas cache_etiquetas;
+    Tipo_Cache_Etiquetas_NET cache_etiquetas_NET;
+    Tipo_Cache_Etiquetas_POI cache_etiquetas_POI;
     final static public double SQRT3 = 1.732050807568877294; //constante para las funciones trigonométricas
     int nose;
     int nose2[][]={{1,2},{3,4}};
@@ -63,7 +65,11 @@ public class IMG_Parser {
         LBL=new Tipo_LBL();
         NET=new Tipo_NET();
         this.cache_etiquetas_activado=cache_etiquetas_activado; //activa o no el cache de etiquetas en LBL
-        if (cache_etiquetas_activado==true) cache_etiquetas=new Tipo_Cache_Etiquetas();
+        if (cache_etiquetas_activado==true) {
+            cache_etiquetas=new Tipo_Cache_Etiquetas();
+            cache_etiquetas_NET=new Tipo_Cache_Etiquetas_NET();
+            cache_etiquetas_POI=new Tipo_Cache_Etiquetas_POI();
+        }
         
         
     }
@@ -174,6 +180,9 @@ public class IMG_Parser {
                 procesar_bloque_fat(nod,fat_nombre_subarchivo,fat_tamaño_subarchivo,fat_bloque_inicio,fat_bloque_final);
             } else if (fat_tipo_subarchivo.compareTo("NET")==0) {
                 procesar_bloque_fat(net,fat_nombre_subarchivo,fat_tamaño_subarchivo,fat_bloque_inicio,fat_bloque_final);
+            } else if (fat_tipo_subarchivo.compareTo("GMP")==0) { 
+                this.cerrar_mapa();
+                return 5; //formato NT, no soportado
             }
             contador++;
             //if (contador%50==0) System.gc(); //libera memoria
@@ -251,6 +260,9 @@ public class IMG_Parser {
         TRE.limite_este=trio_2_latlon(leer_trio());
         TRE.limite_sur=trio_2_latlon(leer_trio());
         TRE.limite_oeste=trio_2_latlon(leer_trio());
+        //correccion de limites
+        if (TRE.limite_este==-180) TRE.limite_este=180;
+        if (TRE.limite_oeste==180) TRE.limite_oeste=-180;
         TRE.offset_niveles_TRE1=leer_quad();
         TRE.tamaño_niveles_TRE1=leer_quad();
         TRE.offset_subdivisiones_TRE2=leer_quad();
@@ -610,8 +622,7 @@ public class IMG_Parser {
         valor_int=leer_quad();
         LBL.LBL6_POI_propiedades_Offset=leer_quad();
         LBL.LBL6_POI_propiedades_tamaño=leer_quad();
-        valor_byte=leer_byte();
-        if (valor_byte!=0) LBL.LBL6_POI_propiedades_ZIP_Bit_Is_Phone_If_No_Phone_Bit=true;
+        LBL.LBL6_POI_propiedades_multiplicador_offset=leer_byte();
         LBL.LBL6_POI_propiedades_mascara_global=leer_byte();
         valor_int=leer_palabra(); //00 00
         valor_byte=leer_byte(); //00
@@ -705,28 +716,28 @@ public class IMG_Parser {
                     //comienzo de la sección de puntos de la subdivisión
                     this.ajustar_puntero(RGN.puntero_puntos[subdivisiones_visibles[contador]]);
                     while (this.puntero<RGN.final_puntos[subdivisiones_visibles[contador]]) {
-                        añadir_punto(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
+                        añadir_punto(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs,procesar_NET);
                     }
                 }
                 if (subdivision.objetos_puntos_indexados==true) {
                     //comienzo de la sección de puntos indexados de la subdivisión
                     this.ajustar_puntero(RGN.puntero_puntos_indexados[subdivisiones_visibles[contador]]);
                     while (this.puntero<RGN.final_puntos_indexados[subdivisiones_visibles[contador]]) {
-                        añadir_punto(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
+                        añadir_punto(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs,procesar_NET);
                     }
                 }
                 if (subdivision.objetos_polilineas==true) {
                     //comienzo de la sección de polilíneas de la subdivisión
                     this.ajustar_puntero(RGN.puntero_polilineas[subdivisiones_visibles[contador]]);
                     while (this.puntero<RGN.final_polilineas[subdivisiones_visibles[contador]]) {
-                        añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
+                        añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET,procesar_NET);
                     }
                 } 
                 if (subdivision.objetos_poligonos==true) {
                     //comienzo de la sección de polígonos de la subdivisión
                     this.ajustar_puntero(RGN.puntero_poligonos[subdivisiones_visibles[contador]]);
                     while (this.puntero<RGN.final_poligonos[subdivisiones_visibles[contador]]) {
-                        añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
+                        añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET,procesar_NET);
                     }
                 } 
                 //if (contador%10==0) System.gc(); //libera memoria antes de pasar a la siguiente subdivisión
@@ -741,6 +752,7 @@ public class IMG_Parser {
             }
             //corrige las cotas de elevación y las pone en metros
             corregir_etiquetas_elevacion(mapa);
+            System.gc();
             return mapa;
 /*        } catch (Throwable t) {
             //probablemente la memoria se ha agotado. sale del bucle y devuelve lo que pueda
@@ -856,7 +868,7 @@ public class IMG_Parser {
                     }
                     //añade el punto al mapa
                     //si hay etiqueta, la añade
-                    crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
+                    crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs,true);
                     //añade el punto a la lista de candidatos
                     candidatos.addElement(punto);
                 }
@@ -883,7 +895,7 @@ public class IMG_Parser {
                     }                    
                     //añade el punto al mapa
                     //si hay etiqueta, la añade
-                    crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
+                    crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs,true);
                     //añade el punto a la lista de candidatos
                     candidatos.addElement(punto);
                 }
@@ -973,6 +985,9 @@ public class IMG_Parser {
         for (contador=lista_etiquetas_NET.size()-1;contador>=0;contador--) {
             etiqueta=(Tipo_Etiqueta_NET)lista_etiquetas_NET.elementAt(contador);
             valor_int=leer_etiqueta_NET(etiqueta,lista_etiquetas);
+            //si el caché está habilitado, añade la etiqueta ya procesada
+            if (this.cache_etiquetas_activado==true) cache_etiquetas_NET.añadir_etiqueta(etiqueta);
+            
         }
         
     }
@@ -988,6 +1003,8 @@ public class IMG_Parser {
         for (contador=lista_POIs.size()-1;contador>=0;contador--) {
             POI=(Tipo_Etiqueta_NET)lista_POIs.elementAt(contador);
             valor_int=leer_POI(POI,lista_etiquetas);
+            //si el caché está habilitado, añade la etiqueta ya procesada
+            if (this.cache_etiquetas_activado==true) cache_etiquetas_POI.añadir_etiqueta(POI);
         }
         
     }
@@ -1000,7 +1017,7 @@ public class IMG_Parser {
             if (retorno!=0) return 1; //error procesando la cabecera
         }
         //coloca el puntero de archivo en la posición del POI
-        this.ajustar_puntero(lbl.puntero_inicio+LBL.LBL6_POI_propiedades_Offset+POI.puntero);
+        this.ajustar_puntero(lbl.puntero_inicio+LBL.LBL6_POI_propiedades_Offset+POI.puntero*potencias_2[LBL.LBL6_POI_propiedades_multiplicador_offset]);
         POI.etiquetas=new Tipo_Etiqueta[1]; //un POI sólo tiene una etiqueta
         puntero_etiqueta=leer_trio() & 0x3fffff;
         POI.etiquetas[0]=crear_etiqueta_vacia(lista_etiquetas,puntero_etiqueta);
@@ -1013,7 +1030,6 @@ public class IMG_Parser {
         int valor_int;
         Tipo_Punto punto;
         Tipo_Etiqueta etiqueta;
-        
         
         //ordena la lista de menor a mayor offset, para que el puntero de archivo no tenga que retroceder
         ordenar_lista_por_puntero_etiqueta(lista_etiquetas,0,lista_etiquetas.size()-1);
@@ -1099,7 +1115,7 @@ public class IMG_Parser {
         src.setElementAt(tmp, loc2);
     }
     
-    private void añadir_punto(boolean indexado ,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud,Vector lista_etiquetas,Vector lista_POIs) {
+    private void añadir_punto(boolean indexado ,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud,Vector lista_etiquetas,Vector lista_POIs,boolean procesar_etiquetas_NET) {
         //toma el punto presente a partir del puntero actual del archivo y lo
         //añade al mapa dado. se usa la misma función para puntos normales
         //y para puntos indexados
@@ -1109,7 +1125,7 @@ public class IMG_Parser {
         //añade el punto al mapa
         if (punto_interior(punto.longitud,punto.latitud,mapa.limites)==false)  return; //si el punto se sale, no se añade
         //si hay etiqueta, la añade
-        crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
+        crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs,procesar_etiquetas_NET);
         //añade el punto a la lista
         if (indexado==false) {
             mapa.Puntos.addElement(punto);
@@ -1146,7 +1162,7 @@ public class IMG_Parser {
         punto=new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud,null,null);
         return punto;
     }
-    private void crear_etiqueta_punto(Tipo_Punto punto,Vector lista_etiquetas,Vector lista_POIs) {
+    private void crear_etiqueta_punto(Tipo_Punto punto,Vector lista_etiquetas,Vector lista_POIs,boolean procesar_etiquetas_NET) {
         //crea la etiqueta de un punto y completa con ella su definición
         Tipo_Etiqueta etiqueta=null;
         Tipo_Etiqueta_NET etiqueta_POI=null;
@@ -1155,7 +1171,9 @@ public class IMG_Parser {
                 etiqueta=crear_etiqueta_vacia(lista_etiquetas,punto.puntero_etiqueta); //referencia a la etiqueta si no es un POI
             }
         } else {
-            etiqueta_POI=crear_POI_vacio(lista_POIs,punto.puntero_etiqueta);
+            if (procesar_etiquetas_NET==true) {
+                etiqueta_POI=crear_POI_vacio(lista_POIs,punto.puntero_etiqueta);
+            } else etiqueta_POI=null;
         }
         punto.etiqueta=etiqueta;
         punto.etiqueta_POI=etiqueta_POI;
@@ -1168,7 +1186,7 @@ public class IMG_Parser {
         } else return false;
     }
 //funciones de proceso de polilíneas y polígonos
-    private void añadir_poli(boolean poligono,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud,Vector lista_etiquetas,Vector lista_etiquetas_NET) {
+    private void añadir_poli(boolean poligono,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud,Vector lista_etiquetas,Vector lista_etiquetas_NET,boolean procesar_NET) {
         //añade al mapa la polilinea ó polígono que se encuentre en la posición actual del archivo
         int valor_int;
         int valor_int2;
@@ -1233,7 +1251,7 @@ public class IMG_Parser {
         bits_base_longitud=valor_int & 0x0f;
         bits_base_latitud=(valor_int & 0xf0)>>4;
         cadena_poli_byte=leer_cadena_bytes(longitud_cadena);
-        if (poligono==false && (poli.tipo==0x20 || poli.tipo==0x21 || poli.tipo==0x22)) return; //evita las curvas de nivel
+        //if (poligono==false && (poli.tipo==0x20 || poli.tipo==0x21 || poli.tipo==0x22)) return; //evita las curvas de nivel
         //parseo de los puntos a partir de la cadena
         mismo_signo_longitud=leer_bit_cadena(cadena_poli_byte,puntero_bit);
         if (mismo_signo_longitud==true) {//mismo signo
@@ -1300,7 +1318,8 @@ public class IMG_Parser {
         if (verificar_clipping(poli,poligono,mapa.limites)==false) return;
         //el elemento puede ser visible, se procesa su etiqueta
         if (poli.datos_en_NET==true) { //nombre contenido en subarchivo NET
-            poli.etiqueta_NET=crear_etiqueta_NET_vacia(lista_etiquetas_NET,poli.offset_etiqueta);
+            //sólo se añade la etiqueta si se han solicitado los datos en NET
+            if (procesar_NET==true) poli.etiqueta_NET=crear_etiqueta_NET_vacia(lista_etiquetas_NET,poli.offset_etiqueta);
         } else { //nombre contenido en subarchivo LBL
             if (poli.offset_etiqueta!=0) { //puede haber punteros nulos para indicar qur no hay etiqueta
                 poli.etiqueta=crear_etiqueta_vacia(lista_etiquetas,poli.offset_etiqueta);
@@ -1495,6 +1514,7 @@ public class IMG_Parser {
         byte nivel_minimo;
         int contador;
         nivel_maximo=TRE.TRE1[TRE.indice_maximo_nivel_con_geometria].zoom;
+        //nivel_maximo=TRE.TRE1[0].zoom;
         nivel_minimo=TRE.TRE1[TRE.TRE1.length-1].zoom; //nivel menos detallado
         if (nivel < nivel_minimo) {
             nuevo_nivel=nivel_minimo; //se ha pedido un nivel menor que el mínimo de un mapa general
@@ -1546,9 +1566,9 @@ public class IMG_Parser {
     }
     private int leer_etiqueta_6(Tipo_Etiqueta etiqueta) {
         //lee una etiqueta con caracteres de 6 bits
-        String caracteres_mayusculas= " ABCDEFGHIJKLMNOPQRSTUVWXYZ~~~~~0123456789~~~~~~";
-        String caracteres_simbolos= "@!\"#$%&'()*+,-./~~~~~~~~~~:;<=>?~~~~~~~~~~~[\\]^_";
-        String caracteres_minusculas="`abcdefghijklmnopqrstuvwxyz~~~~~0123456789~~~~~~";
+        String caracteres_mayusculas= " ABCDEFGHIJKLMNOPQRSTUVWXYZ~~~~~0123456789~~~~~~?";
+        String caracteres_simbolos= "@!\"#$%&'()*+,-./~~~~~~~~~~:;<=>?~~~~~~~~~~~[\\]^_?";
+        String caracteres_minusculas="`abcdefghijklmnopqrstuvwxyz~~~~~0123456789~~~~~~?";
         String cadena;
         int caracter;
         int contador;
@@ -1967,6 +1987,10 @@ public class IMG_Parser {
         //aparece, quiere decir que es un etiqueta nueva, y la crea.
         int contador;
         Tipo_Etiqueta_NET etiqueta;
+        if (this.cache_etiquetas_activado==true) { //si hay caché disponible,
+            etiqueta=cache_etiquetas_NET.leer_etiqueta(puntero);
+            if (etiqueta!=null) return etiqueta; //etiqueta ya existente, no hay que procesarla
+        }        
         for (contador=lista_etiquetas_NET.size()-1;contador>=0;contador--) {
             etiqueta=((Tipo_Etiqueta_NET)lista_etiquetas_NET.elementAt(contador));
             if (etiqueta.puntero==puntero) return etiqueta; //si la encuentra, devuelve su referencia
@@ -1976,11 +2000,15 @@ public class IMG_Parser {
         return etiqueta;
     }
     private Tipo_Etiqueta_NET crear_POI_vacio(Vector lista_POIs,int puntero) {
-        //en pricipio sólo se procesará le etiqueta de los POI's, así que se puede usar el Tipo_Etiqueta_NET
+        //en pricipio sólo se procesará la etiqueta de los POI's, así que se puede usar el Tipo_Etiqueta_NET
         //busca en la lista de POI's uno que tenga el puntero dado. si no
         //aparece, quiere decir que es nuevo, y lo crea.
         int contador;
         Tipo_Etiqueta_NET etiqueta;
+        if (this.cache_etiquetas_activado==true) { //si hay caché disponible,
+            etiqueta=cache_etiquetas_POI.leer_etiqueta(puntero);
+            if (etiqueta!=null) return etiqueta; //etiqueta ya existente, no hay que procesarla
+        }        
         for (contador=lista_POIs.size()-1;contador>=0;contador--) {
             etiqueta=((Tipo_Etiqueta_NET)lista_POIs.elementAt(contador));
             if (etiqueta.puntero==puntero) return etiqueta; //si la encuentra, devuelve su referencia
@@ -2144,7 +2172,7 @@ public class IMG_Parser {
         int LBL5_POI_indices_tamaño_registro;
         int LBL6_POI_propiedades_Offset;
         int LBL6_POI_propiedades_tamaño;
-        boolean LBL6_POI_propiedades_ZIP_Bit_Is_Phone_If_No_Phone_Bit;
+        byte LBL6_POI_propiedades_multiplicador_offset;
         byte LBL6_POI_propiedades_mascara_global;
         int LBL7_POI_tipos_Offset;
         int LBL7_POI_tipos_tamaño;
@@ -2185,4 +2213,54 @@ public class IMG_Parser {
         }
         
     }
+        private class Tipo_Cache_Etiquetas_NET { //almacén de las etiquetas en NET ya procesadas. sólo disponible si cache_etiquetas_activado es true
+        private Vector etiquetas;
+        public Tipo_Cache_Etiquetas_NET(){
+            etiquetas=new Vector(); //crea el almacén
+        }
+        public Tipo_Etiqueta_NET leer_etiqueta(int puntero_etiqueta) {
+            //busca la etiqueta con el puntero dado, y si no está, devuelve null
+            int contador;
+            Tipo_Etiqueta_NET etiqueta;
+            for (contador=etiquetas.size()-1;contador>=0;contador--) {
+                etiqueta=(Tipo_Etiqueta_NET)etiquetas.elementAt(contador);
+                if (etiqueta.puntero==puntero_etiqueta) return etiqueta;
+            }
+            return null; //etiqueta no encontrada
+        }
+        public int añadir_etiqueta(Tipo_Etiqueta_NET etiqueta) { //añade al cache una etiqueta ya procesada
+            if (leer_etiqueta(etiqueta.puntero)!=null ) { //si ya existía, hay algún problema en alguna parte
+                return 1; //error extraño
+            }
+            etiquetas.addElement(etiqueta);
+            return 0; //etiqueta añadida con éxito
+        }
+        
+    }
+
+        private class Tipo_Cache_Etiquetas_POI { //almacén de las etiquetas en POI ya procesadas. sólo disponible si cache_etiquetas_activado es true
+            private Vector etiquetas;
+            public Tipo_Cache_Etiquetas_POI(){
+                etiquetas=new Vector(); //crea el almacén
+            }
+            public Tipo_Etiqueta_NET leer_etiqueta(int puntero_etiqueta) {
+                //busca la etiqueta con el puntero dado, y si no está, devuelve null
+                int contador;
+                Tipo_Etiqueta_NET etiqueta;
+                for (contador=etiquetas.size()-1;contador>=0;contador--) {
+                    etiqueta=(Tipo_Etiqueta_NET)etiquetas.elementAt(contador);
+                    if (etiqueta.puntero==puntero_etiqueta) return etiqueta;
+                }
+                return null; //etiqueta no encontrada
+            }
+            public int añadir_etiqueta(Tipo_Etiqueta_NET etiqueta) { //añade al cache una etiqueta ya procesada
+                if (leer_etiqueta(etiqueta.puntero)!=null ) { //si ya existía, hay algún problema en alguna parte
+                    return 1; //error extraño
+                }
+                etiquetas.addElement(etiqueta);
+                return 0; //etiqueta añadida con éxito
+            }
+            
+        }
+        
 }
