@@ -22,6 +22,7 @@ public class Mapa_IMG {
     public int nivel_zoom; //0-24. puntero al valor que mide 1/5 de la pantalla visible
     public String nombre_archivo; //nombre del IMG abierto
     public String descripcion; //descripción contenida en la cabecera del IMG
+    public boolean error_memoria; //true si ha habido problemas de memoria
     
     /** Creates a new instance of Mapa_IMG */
     public Mapa_IMG() {
@@ -29,6 +30,7 @@ public class Mapa_IMG {
         Puntos_Indexados=new Vector();
         Polilineas=new Vector();
         Poligonos=new Vector();
+        error_memoria=false;
     }
     
 }

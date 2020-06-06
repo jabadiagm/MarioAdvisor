@@ -14,17 +14,20 @@ import javax.microedition.lcdui.*;
  *
  * @author javier
  */
-public class Visor_IMG extends MIDlet implements CommandListener{
+public class Visor_IMG extends MIDlet  {
+    //elementos visuales del mislet
     public Display pantalla;
     private IMG_Canvas img_Canvas;
     private Configuracion configuracion;
     private Config_Canvas config_canvas;
     private BT_Canvas bt_canvas;
+    private Buscar_Canvas buscar_canvas;
+    private Explorador_Carpetas explorador_carpetas;
     //variables para el formulario de creación de carpeta
-    public Form formulario_carpeta; //selección del directorio de trabajo
-    private ChoiceGroup seleccion_raiz;
-    private Command cmd_crear_carpeta;
-    private Command cmd_salir;
+    //public Form formulario_carpeta; //selección del directorio de trabajo
+    //private ChoiceGroup seleccion_raiz;
+    //private Command cmd_crear_carpeta;
+    //private Command cmd_salir;
     
     
     
@@ -32,10 +35,10 @@ public class Visor_IMG extends MIDlet implements CommandListener{
     public Visor_IMG() {
         pantalla=getDisplay();
         configuracion=new Configuracion();
-        formulario_carpeta=new Form("Select Program Folder");
-        seleccion_raiz=new ChoiceGroup("Roots",ChoiceGroup.EXCLUSIVE);
-        formulario_carpeta.append(seleccion_raiz);
-        formulario_carpeta.setCommandListener(this);
+        //formulario_carpeta=new Form("Select Program Folder");
+        //seleccion_raiz=new ChoiceGroup("Roots",ChoiceGroup.EXCLUSIVE);
+        //formulario_carpeta.append(seleccion_raiz);
+        //formulario_carpeta.setCommandListener(this);
         initialize();
         
     }
@@ -79,7 +82,14 @@ public class Visor_IMG extends MIDlet implements CommandListener{
         
         if (retorno==configuracion.Estado_OK) { //listo para comenzar
             arrancar_img_canvas();
-        } else { //fallo al cargar la configuración.muestra el formulario
+        } else if (configuracion.estado==Configuracion.Estado_Error_Acceso_RMS) {
+            mensaje_error("RMS access Error.");
+            this.exitMIDlet();
+        } else if (configuracion.estado==Configuracion.Estado_Configuracion_No_Encontrada) {
+            crear_configuracion_defecto_y_arrancar();
+        }
+            
+/*        } else { //fallo al cargar la configuración.muestra el formulario
             if (configuracion.ruta_carpeta_archivos==null) { //ruta no disponible, hay que crearla
                 for (contador=0;contador<configuracion.raices.length;contador++) {
                     seleccion_raiz.append(configuracion.raices[contador],null);
@@ -91,15 +101,15 @@ public class Visor_IMG extends MIDlet implements CommandListener{
                 pantalla.setCurrent(formulario_carpeta);
             } else {
                 crear_configuracion_defecto_y_arrancar();
-
-            }
-        }
+                
+            } 
+        }*/
     }
     private void arrancar_img_canvas() {
         //activa la tarea principal
         img_Canvas=new IMG_Canvas(this,configuracion);
         pantalla.setCurrent(img_Canvas);
-        img_Canvas.inicializar();
+        img_Canvas.inicializar(); 
     }
     public void mostrar_configuracion() {
         //muestra la pantalla de configuración
@@ -109,9 +119,20 @@ public class Visor_IMG extends MIDlet implements CommandListener{
     public void mostrar_img_canvas() {
         if (config_canvas!=null) config_canvas=null; //si se viene del formulario de configuración se borra
         if (bt_canvas!=null) bt_canvas=null; //si se viene del formulario de selección de GPS, se borra
+        if (buscar_canvas!=null) buscar_canvas=null; //si viene de la pantalla de búsqueda, la quita
+        if (explorador_carpetas!=null) explorador_carpetas=null; //si viene del explorador de carpetas, lo borra
         //muestra la pantallaprincipal
-        if (img_Canvas.pausar==true) img_Canvas.pausar=false;
         pantalla.setCurrent(img_Canvas);
+        //al volver de algún formulacio deja de ir a pantalla completa. se le hace ir manualmente
+        if (configuracion.pantalla_completa==true) img_Canvas.setFullScreenMode(true);
+    }
+    public void mostrar_img_canvas_con_cambio_coordenadas(float longitud,float latitud,int nivel_zoom) {
+        //muestra el mapa cambiando antes las coordenadas del centro. creado para ver resultados de búsqueda
+        if (buscar_canvas!=null) buscar_canvas=null; //si viene de la pantalla de búsqueda, la quita
+        pantalla.setCurrent(img_Canvas);
+        //al volver de algún formulacio deja de ir a pantalla completa. se le hace ir manualmente
+        if (configuracion.pantalla_completa==true) img_Canvas.setFullScreenMode(true);
+        img_Canvas.regenerar_mapa_publico(longitud,latitud,6);
     }
     public void mostrar_BT_canvas() {
         //muestra el formulario de selección de GPS bluetooth
@@ -119,13 +140,23 @@ public class Visor_IMG extends MIDlet implements CommandListener{
         pantalla.setCurrent(bt_canvas.formulario_BT);
         
     }
+    public void mostrar_buscar_canvas(Gestor_Mapas gestor_mapas) {
+        //muestra el formulario de búsqueda de elementos del mapa
+        if (buscar_canvas==null) buscar_canvas=new Buscar_Canvas(this,gestor_mapas);
+        pantalla.setCurrent(buscar_canvas.frm_buscar);
+    }
+    public void mostrar_explorador() {
+        //muestra el formulario de selección de carpeta
+        if (explorador_carpetas==null) explorador_carpetas=new Explorador_Carpetas (this,config_canvas);
+        explorador_carpetas.explorar();
+    }
     public void pauseApp() {
     }
     
     public void destroyApp(boolean unconditional) {
     }
     
-    public void commandAction(Command command, Displayable displayable) {
+    /*public void commandAction(Command command, Displayable displayable) {
         int retorno;
         if (command==cmd_salir) {
             this.exitMIDlet();
@@ -142,16 +173,11 @@ public class Visor_IMG extends MIDlet implements CommandListener{
                 mensaje_error("Failed to save default config");
             }
         }
-    }
+    } */
 private void crear_configuracion_defecto_y_arrancar() {
     //intenta crear un archivo de configuración por defecto. si lo consigue, arranca. y si no, se sale.
     int retorno;
-    retorno=configuracion.cargar_configuracion_defecto();
-    if (retorno!=0) {
-        mensaje_error("Failed to create default config.");
-        notifyDestroyed();
-        return;
-    }
+    configuracion.cargar_configuracion_defecto();
     retorno=configuracion.guardar_configuracion();
     if (retorno!=0) {
         mensaje_error("Failed to save default config.");
@@ -159,8 +185,8 @@ private void crear_configuracion_defecto_y_arrancar() {
         return;
     }
     arrancar_img_canvas();
-
-}    
+    
+}
 public void mensaje_error(String texto) {
     //muestra el mensaje de error indicado
     Alert mensaje;

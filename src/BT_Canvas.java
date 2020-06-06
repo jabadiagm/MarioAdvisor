@@ -26,6 +26,7 @@ public class BT_Canvas implements CommandListener,Runnable{
     private Command cmd_seleccionar;
     private Visor_IMG midlet;
     private Configuracion configuracion;
+    private String ultimo_error;
     public BT_Canvas(Configuracion config,Visor_IMG midlet) {
         this.midlet=midlet;
         this.configuracion=config;
@@ -47,7 +48,7 @@ public class BT_Canvas implements CommandListener,Runnable{
     public void commandAction(Command command, Displayable displayable) {
         if (command==cmd_volver) {
             midlet.mostrar_img_canvas();
-        } else if (command==cmd_seleccionar) {
+        } else if (command==cmd_seleccionar && seleccion_GPS.size()>=1) {
             btconnector.connect(seleccion_GPS.getSelectedIndex());
             synchronized(this){ // resume the thread.
                 this.notify();
@@ -59,13 +60,16 @@ public class BT_Canvas implements CommandListener,Runnable{
         String [] dispositivos=null; //lista de dispositivos encontrador
         int contador;
         int encontrados; //número de dispositivos encontrador
+        String error_bt;
         dispositivos=btconnector.getDeviceNames();
         //comprueba si aparecen nuevos dispositivos mientras dura la búsqueda
-        while (btconnector.doneSearchingDevices()==false) {
+        while (btconnector.doneSearchingDevices()==false && btconnector.get_last_error()==null) {
             try{ //sale de la tarea para que el resto funcione
                 Thread.sleep(100);
             }catch(Exception e){}
         }
+        error_bt=btconnector.get_last_error();
+        if (error_bt!=null) midlet.mensaje_error(error_bt);
         //ha terminado de buscar, se cambia la layenda de la lista
         seleccion_GPS.setLabel("Search Complete");
         for (contador=0;contador<dispositivos.length;contador++) {
@@ -80,13 +84,20 @@ public class BT_Canvas implements CommandListener,Runnable{
             }catch(Exception e){
             }
         }
-        while (btconnector.doneSearchingServices()==false) {
+        while (btconnector.doneSearchingServices()==false && ultimo_error==null) {
+            ultimo_error=btconnector.get_last_error();
             try{ //sale de la tarea para que el resto funcione
                 Thread.sleep(100);
             }catch(Exception e){}
             
         }
-        configuracion.GPS_url=btconnector.url;
+        if (ultimo_error!=null) {//no se ha podido obtener la dirección del dispositivo
+            configuracion.GPS_url="";
+            midlet.mensaje_error(ultimo_error);
+        } else {
+            configuracion.GPS_url=btconnector.url;
+        }
+        
         midlet.mostrar_img_canvas();
     }
     

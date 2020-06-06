@@ -26,6 +26,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
     private Command cmd_GPS_On;
     private Command cmd_GPS_Off;
     private Command cmd_buscador_GPS_BT;
+    private Command cmd_buscar;
     private Command cmd_prueba;
     //variables de manejo de marco de mapa
     private double scaletop;
@@ -72,11 +73,11 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
     private Graphics graphics_lienzo;
     private Gestor_Mapas gestor_mapas; //=new Gestor_Mapas("prueba");
     private GPSReader GPS;
+    private GPS_jsr179 gps_interno;
     //variables de navegación
     private boolean GPS_virtual=false; //true para depuración
     boolean navegacion_GPS_on=false; //si es true, se marca el puntero de dirección en la posición que diga el GPS
     boolean navegacion_manual=true; //si es true, se muestra la brújula y el movimiento lo controla el teclado. si es false, el movimiento es controlado externamente y no se dibuja la cruz
-    public boolean pausar=false; //pasa a true desde fuera para pausar el bucle principal
     private boolean proceso_etiquetas_NET=false; //el proceso de estas etiqutas consume mucho tiempo y espacio, al menos por ahora. el programa arranca sin ese proceso
     
     
@@ -129,14 +130,16 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         cmd_GPS_On=new Command("GPS On",Command.ITEM,2);
         cmd_GPS_Off=new Command("GPS Off",Command.ITEM,2); //este control queda sin añadir
         this.addCommand(cmd_GPS_On);
-        cmd_buscador_GPS_BT=new Command ("BT GPS Finder",Command.ITEM,6);
+        cmd_buscador_GPS_BT=new Command("BT GPS Finder",Command.ITEM,6);
         this.addCommand(cmd_buscador_GPS_BT);
+        cmd_buscar=new Command("Search",Command.ITEM,3);
+        this.addCommand(cmd_buscar);
         this.setCommandListener(this);
         fuente_pequeña=Font.getFont(Font.FACE_SYSTEM,Font.STYLE_PLAIN,Font.SIZE_SMALL);
         fuente_mediana=Font.getFont(Font.FACE_SYSTEM,Font.STYLE_PLAIN,Font.SIZE_MEDIUM);
         fuente_grande=Font.getFont(Font.FACE_SYSTEM,Font.STYLE_PLAIN,Font.SIZE_LARGE);
         g=this.getGraphics();
-        gestor_mapas=new Gestor_Mapas(configuracion.ruta_carpeta_archivos,g,this,configuracion.detalle_minimo_mapa_general,configuracion.tamaño_cache_mapas,fuente_grande,configuracion.cache_etiquetas);
+        gestor_mapas=new Gestor_Mapas(configuracion.ruta_carpeta_archivos,g,this,configuracion.detalle_minimo_mapa_general,configuracion.tamaño_cache_mapas,fuente_grande,configuracion.cache_etiquetas,configuracion.acceso_archivos_habilitado);
         //si se ha cargado la configuración por defecto, lon y lat valen cero.
         //entonces, se coloca la posición sugerida por gestor_mapas
         if (configuracion.centro_latitud_inicial==0 && configuracion.centro_longitud_inicial==0) {
@@ -181,20 +184,24 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
             regenerar_mapa(nivel_zoom,false); //vuelve a cargar el mapa
             regenerar_pantalla();
         } else if (c==cmd_GPS_On) {
-            this.removeCommand(cmd_GPS_On);
-            this.addCommand(cmd_GPS_Off);
             conectar_GPS();
         } else if (c==cmd_GPS_Off) {
-            this.removeCommand(cmd_GPS_Off);
-            this.addCommand(cmd_GPS_On);
             desconectar_GPS();
+            regenerar_pantalla(); //quita la marca GPS on de la pantalla
         } else if (c==cmd_configuracion) {
-            this.pausar=true;
             midlet.mostrar_configuracion();
             
         } else if (c==cmd_buscador_GPS_BT) {
-            this.pausar=true;
-            midlet.mostrar_BT_canvas();
+            if (configuracion.JSR82_disponible==false) {
+                midlet.mensaje_error("Bluetooth Not Available");
+            } else {
+                midlet.mostrar_BT_canvas();
+            }
+        } else if (c==cmd_buscar) {
+            midlet.mostrar_buscar_canvas(gestor_mapas);
+            //Tipo_Criterios_Busqueda criterios_busqueda=null;
+            //criterios_busqueda=new Tipo_Criterios_Busqueda(0,"tudela",0,0,false);
+            //gestor_mapas.buscar(criterios_busqueda);
         }
     }
     private void cargar_iconos() {
@@ -227,11 +234,16 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         redibujar=true;
         boolean parate=false;
         while(true){
-            while (pausar==true)
+            //while (pausar==true)
+            while (midlet.pantalla.getCurrent()!=this) //si el IMG_canvas no está en pantalla, espera
                 try {t.sleep(100);
                 } catch (InterruptedException ex) {
                     ex.printStackTrace();
                 }
+            //navegación GPS. si está activada, el encuadre depende de la posición
+            if (navegacion_GPS_on==true && navegacion_manual==false) {
+                redibujar=procesar_GPS();
+            }
             estado_teclas=getKeyStates();
             if ((estado_teclas & LEFT_PRESSED) !=0) {
                 navegacion_manual=true;
@@ -294,8 +306,15 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
                 if (navegacion_GPS_on==true && navegacion_manual==true) {
                     navegacion_manual=false;
                     //centra la pantalla donde diga el GPS
-                    centro_pantalla_Lon=GPS.longitud;
-                    centro_pantalla_Lat=GPS.latitud;
+                    if (GPS!=null) {
+                        centro_pantalla_Lon=GPS.longitud;
+                        centro_pantalla_Lat=GPS.latitud;
+                    } else {
+                        if (gps_interno.navegando==true) {
+                            centro_pantalla_Lon=gps_interno.longitud;
+                            centro_pantalla_Lat=gps_interno.latitud;
+                        }
+                    }
                     regenerar_mapa(nivel_zoom,false);
                     redibujar=true;
                 }
@@ -313,33 +332,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
                     
                 }
             }
-            //navegación GPS. si está activada, el encuadre depende de la posición
-            if (navegacion_GPS_on==true && navegacion_manual==false) {
-                //la diferencia debe ser superior a 1 píxel
-                int gps_delta_x,gps_delta_y; //deriva en píxeles de la posición marcada por el GPS respecto del centro original del mapa
-                if (GPS_virtual==true) {
-                    GPS.latitud+=0.0001;
-                    GPS.longitud-=0.00001;
-                }
-                //deltas si la posición la marca el GPS
-                gps_delta_x=(int)((GPS.longitud-centro_Lon)*escala_X)+(int)((float)(configuracion.factor_mapa-1)*((float)pantalla_X/2));
-                gps_delta_y=(int)((centro_Lat-GPS.latitud)*escala_Y)+(int)((float)(configuracion.factor_mapa-1)*((float)pantalla_Y/2));
-                if (Math.abs(gps_delta_x-delta_X)>2 || Math.abs(gps_delta_y-delta_Y)*escala_Y>2) { //existe un desplazamiento >2 píxeles en algún eje
-                    redibujar=true;
-                    //ajusta las nuevas deltas
-                    centro_pantalla_Lon+=(gps_delta_x-delta_X)/this.escala_X; 
-                    centro_pantalla_Lat-=(gps_delta_y-delta_Y)/this.escala_Y;
-                    delta_X=gps_delta_x;
-                    delta_Y=gps_delta_y;
-
-                    //si las deltas hacen salirse del mapa cargado, hay que que regenerar
-                    if (delta_X<0 || delta_Y<0 || delta_X>=delta_X_max || delta_Y>delta_Y_max) {
-                        regenerar_mapa(nivel_zoom,false);
-                    }
-
-                    
-                }
-            }
+            
             
             if (redibujar==true) {
                 //coordenadas del nuevo centro de la pantalla
@@ -388,8 +381,12 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         g.drawString(cadena,11,5,Graphics.LEFT | Graphics.TOP);
         g.setColor(0,0,0);
         g.drawString(cadena,10,4,Graphics.LEFT | Graphics.TOP);
-        if (this.navegacion_GPS_on==true && GPS.NUM_SATELITES>2) {
-            g.drawString("GPS ON",this.pantalla_X-5,4,Graphics.RIGHT | Graphics.TOP);
+        if (this.navegacion_GPS_on==true) {
+            if (GPS!=null) { //gps bluetooth
+                if (GPS.NUM_SATELITES>2) g.drawString("GPS ON",this.pantalla_X-5,4,Graphics.RIGHT | Graphics.TOP);
+            } else { //gps interno
+                if (gps_interno.navegando==true) g.drawString("GPS ON",this.pantalla_X-5,4,Graphics.RIGHT | Graphics.TOP);
+            }
         }
         dibujar_escala(g,0.08f,0.3f);
         //si no hay mapas lo avisa en la línea de estado
@@ -430,7 +427,7 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         g.drawLine(origen_x-this.pantalla_X/50,origen_y,origen_x+this.pantalla_Y/50,origen_y);
         g.drawString(texto_escala,origen_x-this.pantalla_X/25,origen_y+fuente_pequeña.getHeight()/2,Graphics.TOP|Graphics.LEFT);
     }
-    private void dibujar_linea_estado (String texto,Font fuente) {
+    private void dibujar_linea_estado(String texto,Font fuente) {
         //coloca el texto en la parte inferior de la pantalla, con un degradado para darle más contraste
         g.setColor(0);
         g.setFont(fuente);
@@ -438,21 +435,82 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         flushGraphics();
         
     }
-    private int conectar_GPS() {
-        GPS=new GPSReader(configuracion.GPS_url);
-        GPS.longitud=(float)centro_pantalla_Lon;
-        GPS.latitud=(float)centro_pantalla_Lat;
+    private void conectar_GPS() {
+        int retorno;
+        if (configuracion.GPS_url.toLowerCase().compareTo("jsr179")==0) { //URL de GPS interno
+            if (configuracion.JSR179_disponible==false) return; //no hay GPS interno
+            gps_interno=new GPS_jsr179();
+            retorno=gps_interno.iniciar();
+            if (retorno!=0) return;
+        } else {
+            if (configuracion.JSR82_disponible==false) return; //no hay bluetooth
+            GPS=new GPSReader(configuracion.GPS_url);
+            GPS.longitud=(float)centro_pantalla_Lon;
+            GPS.latitud=(float)centro_pantalla_Lat;
+        }
+        this.removeCommand(cmd_GPS_On);
+        this.addCommand(cmd_GPS_Off);
         navegacion_GPS_on=true;
         navegacion_manual=false;
-        return 0; //conexión realizada con éxito
-        
     }
     private int desconectar_GPS() {
-        GPS.cerrar(); //cierra la tarea interna
-        GPS=null;
+        //ajusta el menú
+        this.removeCommand(cmd_GPS_Off);
+        this.addCommand(cmd_GPS_On);
+        if (GPS!=null) { //GPS bluetooth
+            GPS.cerrar(); //cierra la tarea interna
+            GPS=null;
+        } else { //GPS interno
+            gps_interno.terminar();
+            gps_interno=null;
+        }
         navegacion_GPS_on=false;
         return 0;
     }
+private boolean procesar_GPS() {
+    //comprueba el estado del GPS, y si está disponible obtiene la posición. con
+    //ella comrpueba si hay que obtener un nuevo mapa.
+    //devuelve true si se ha regenerado el mapa, para que lo redibuje
+    float GPS_longitud=0,GPS_latitud=0; //coordenadas indicadas por el GPS, ya sea BT o interno
+    int gps_delta_x,gps_delta_y; //deriva en píxeles de la posición marcada por el GPS respecto del centro original del mapa
+    if (GPS!=null) { //GPS bluetooth
+        if (GPS.ultimo_error!=null) { //error en la conexión
+            midlet.mensaje_error(GPS.ultimo_error);
+            desconectar_GPS();
+            return false;
+        } else { //GPS externo funcionando
+            GPS_longitud=GPS.longitud;
+            GPS_latitud=GPS.latitud;
+        }
+    } else { //GPS interno
+        if (gps_interno.navegando==false) return false;
+        GPS_longitud=gps_interno.longitud;
+        GPS_latitud=gps_interno.latitud;
+    }
+    
+    //la diferencia debe ser superior a 1 píxel
+    if (GPS_virtual==true) {
+        GPS.latitud+=0.0001;
+        GPS.longitud-=0.00001;
+    }
+    //deltas si la posición la marca el GPS
+    gps_delta_x=(int)((GPS_longitud-centro_Lon)*escala_X)+(int)((float)(configuracion.factor_mapa-1)*((float)pantalla_X/2));
+    gps_delta_y=(int)((centro_Lat-GPS_latitud)*escala_Y)+(int)((float)(configuracion.factor_mapa-1)*((float)pantalla_Y/2));
+    if (Math.abs(gps_delta_x-delta_X)>2 || Math.abs(gps_delta_y-delta_Y)*escala_Y>2) { //existe un desplazamiento >2 píxeles en algún eje
+        //ajusta las nuevas deltas
+        centro_pantalla_Lon+=(gps_delta_x-delta_X)/this.escala_X;
+        centro_pantalla_Lat-=(gps_delta_y-delta_Y)/this.escala_Y;
+        delta_X=gps_delta_x;
+        delta_Y=gps_delta_y;
+        
+        //si las deltas hacen salirse del mapa cargado, hay que que regenerar
+        if (delta_X<0 || delta_Y<0 || delta_X>=delta_X_max || delta_Y>delta_Y_max) {
+            regenerar_mapa(nivel_zoom,false);
+            return true; //indica que hay que redibujar
+        } else  return true; //el mapa actual es válido, sólo hay que reposicionar
+    } else return false;
+
+}    
     private String formato_coordenada(double coordenada) {
         //devuelve como cadena el valor de una longitud o latitud, con 4 decimales
         int entero;
@@ -484,19 +542,35 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
                 for (contador=mapas.length-1;contador>=0;contador--) {
                     mapas[contador]=null;
                 }
-                System.gc();
+                //System.gc();
             }
             dibujar_linea_estado("Generating Map...",fuente_pequeña);
             limites=centro_zoom_2_rectangulo((float)centro_pantalla_Lon,(float)centro_pantalla_Lat,nuevo_nivel_zoom);
             mapas=gestor_mapas.generar_mapa(limites,nuevo_nivel_zoom,proceso_etiquetas_NET);
+            
         }
         this.definir_bordes_mapa((double)centro_pantalla_Lon,(double)centro_pantalla_Lat,nuevo_nivel_zoom);
         //la pantalla debe caer en el recuadro central
         this.delta_X=(int)((float)(configuracion.factor_mapa-1)*((float)pantalla_X/2)); //casting para tamaños de pantalla impares
         this.delta_Y=(int)((float)(configuracion.factor_mapa-1)*((float)pantalla_Y/2));
-        dibujar_mapas(mapas);
-        tiempo=System.currentTimeMillis()-tiempo;
-        System.gc();
+        try {
+            dibujar_mapas(mapas);
+            tiempo=System.currentTimeMillis()-tiempo;
+        } catch (Throwable t) {
+            //probablemente la memoria se ha agotado. sale del bucle y devuelve lo que pueda
+            for (contador=mapas.length-1;contador>=0;contador--) {
+                mapas[contador]=null;
+            }
+        }
+        //System.gc();
+    }
+    public void regenerar_mapa_publico(double longitud,double latitud,int nivel_zoom) {
+        //centra el mapa en una posición indicada desde fuera del objeto. pensado para usar en las búsquedas
+        //centra la nueva posición
+        centro_pantalla_Lon=longitud;
+        centro_pantalla_Lat=latitud;
+        regenerar_mapa(nivel_zoom,false);
+        regenerar_pantalla();
     }
     private boolean mapa_nuevo_necesario(Mapa_IMG [] mapas,float longitud,float latitud, int nuevo_nivel_zoom) {
         //devuelve true si el rectángulo y el nivel de detalle solicidados no caben en el mapa actual
@@ -641,6 +715,12 @@ public class IMG_Canvas extends GameCanvas implements CommandListener,Runnable{
         //que le corresponde
         int x,y;
         Tipo_Propiedades_Punto propiedades;
+        //se evitan las etiquetas creadas por el cGPSmapper
+        if (punto.etiqueta!=null) {
+            if (punto.etiqueta.nombre_completo.indexOf("cgpsmapper")!=-1) {
+                return;
+            }
+        }
         propiedades=auxiliar.leer_propiedades_punto(punto.tipo);
         x=(int)((punto.longitud-scaleleft)*escala_X);
         y=(int)((scaletop-punto.latitud)*escala_Y);

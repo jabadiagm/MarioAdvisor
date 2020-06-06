@@ -80,6 +80,7 @@ public class IMG_Parser {
         int fat_bloque_inicio;
         int fat_bloque_final=0;
         int posicion_fat;
+        int contador=0;
         String tipo_subarchivo_anterior="";
         this.mapa_interno=mapa_interno;
         this.clase=clase;
@@ -105,7 +106,7 @@ public class IMG_Parser {
                 //ultimo_error="No se permite el reinicio del puntero de archivo";
                 //return 3;
             } else {
-                reset_soportado=true; //esto permite mover el puntero hacia atrás mucho más rápido
+                reset_soportado=false; //esto permite mover el puntero hacia atrás mucho más rápido
             }
         } catch (IOException ex) {
             ultimo_error="Error de entrada/salida";
@@ -114,7 +115,7 @@ public class IMG_Parser {
         this.archivo_abierto=true;
         this.ruta_archivo=ruta_mapa;
         //marca el origen para poder hacer saltos
-        this.ajustar_punto_reinicio();
+        if (reset_soportado==true) this.ajustar_punto_reinicio();
         xor_byte=leer_byte_int();
         this.ajustar_puntero(0x49);
         this.descripcion_mapa=this.leer_cadena(20);
@@ -171,6 +172,8 @@ public class IMG_Parser {
             } else if (fat_tipo_subarchivo.compareTo("NET")==0) {
                 procesar_bloque_fat(net,fat_nombre_subarchivo,fat_tamaño_subarchivo,fat_bloque_inicio,fat_bloque_final);
             }
+            contador++;
+            //if (contador%50==0) System.gc(); //libera memoria
         }
         
         ultimo_error="";
@@ -214,7 +217,7 @@ public class IMG_Parser {
         return 0; //archivo de mapa cerrado sin problemas
     }
     private int procesar_cabecera_tre(int detalle_general){
-        //lee los límites del mapa actual y loz niveles de zoom
+        //lee los límites del mapa actual y los niveles de zoom
         //detalle_general es el valor a partir del cual se dibuja el plano general.
         //si el mapa general tiene niveles con menor zoom, se ajustan para que no haya solapes
         
@@ -275,7 +278,8 @@ public class IMG_Parser {
             if (valor_int!=0) return valor_int; //archivo no abierto ó error de acceso
         }
         //asigna espacio para TRE2
-        TRE.TRE2=new Vector();//TRE.tamaño_subdivisiones_TRE2/14); //tamaño aproximado (algo mayor) de la sección de subdivisiones
+        //TRE.TRE2=new Vector();//TRE.tamaño_subdivisiones_TRE2/14); //tamaño aproximado (algo mayor) de la sección de subdivisiones
+        TRE.TRE2=new Tipo_Subdivisiones_TRE2[TRE.tamaño_subdivisiones_TRE2/14]; //tamaño aproximado (algo mayor) de la sección de subdivisiones
         rellenar_TRE2();
         tre_procesado=true;
         ultimo_error="";
@@ -311,10 +315,10 @@ public class IMG_Parser {
                 }
             }
         }
-        
     }
     void rellenar_TRE2(){ //procesa las subdivisiones
         int contador, contador2;
+        int contador_subdivisiones=0;
         byte nivel;
         byte n_bits;
         Tipo_Subdivisiones_TRE2 subdivision;
@@ -364,8 +368,10 @@ public class IMG_Parser {
                 if (nivel!=TRE.TRE1[TRE.TRE1.length-1].zoom) { //el último nivel no tiene por qué ser el 0
                     subdivision.subdivision_siguiente_nivel=leer_palabra(); //información presente en todos los ni veles menos el último
                 }
-                TRE.TRE2.addElement(subdivision); //añade la información al vector de subdivisiones
-                if (contador2%100==0) System.gc(); //libera memoria para que no se cargue
+                //TRE.TRE2.addElement(subdivision); //añade la información al vector de subdivisiones
+                TRE.TRE2[contador_subdivisiones]=subdivision; //añade la información al vector de subdivisiones
+                contador_subdivisiones++;
+                //if (contador2%400==0) System.gc(); //libera memoria para que no se cargue
                 
             }
             
@@ -390,7 +396,8 @@ public class IMG_Parser {
         offset_rgn=leer_quad(); //offset dentro de RGN al comienzo de datos
         tamaño_rgn=leer_quad();
         for (contador=0;contador<TRE.numero_subdivisiones;contador++) {
-            subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(contador);
+            //subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(contador);
+            subdivision=TRE.TRE2[contador];
             //cuenta elnúmero de secciones que contiene la subdivisión
             numero_secciones=0;
             if (subdivision.objetos_puntos==true) numero_secciones++;
@@ -409,7 +416,8 @@ public class IMG_Parser {
             //el último puntero se rellena con la posición de comienzo de la siguiente subdivisión.
             //si ya se está en la última, hay que usar el tamaño del subarchivo
             if (contador<(TRE.numero_subdivisiones-1)) {
-                punteros[numero_secciones]=((Tipo_Subdivisiones_TRE2)TRE.TRE2.elementAt(contador+1)).puntero_RGN-subdivision.puntero_RGN;
+                //punteros[numero_secciones]=((Tipo_Subdivisiones_TRE2)TRE.TRE2.elementAt(contador+1)).puntero_RGN-subdivision.puntero_RGN;
+                punteros[numero_secciones]=TRE.TRE2[contador+1].puntero_RGN-subdivision.puntero_RGN;
             } else {
                 //si se trata de la última sección, hay que restar al tamaño del subarchivo la posición de la última subdivisión
                 punteros[numero_secciones]=tamaño_rgn-subdivision.puntero_RGN;
@@ -439,6 +447,7 @@ public class IMG_Parser {
                 RGN.final_poligonos[contador]=punteros[numero_secciones+1]-1;
                 numero_secciones++;
             }
+            //if (contador%200==0) System.gc();
         }
         rgn_procesado=true;
         ultimo_error="";
@@ -547,71 +556,206 @@ public class IMG_Parser {
         int puntero_nivel;
         int max_subdiv; //última subdivisión del nivel a generar
         byte n_bits; //número de bits del nivel actual
+        boolean error=false; //true si hay algún errror. entonces, deja de procesar
+        Tipo_Subdivisiones_TRE2 subdivision;
+        Mapa_IMG mapa;
+//        try {
+            Vector lista_etiquetas=new Vector();
+            Vector lista_etiquetas_NET=new Vector();
+            Vector lista_POIs=new Vector();
+            if (rgn_procesado==false) return null; //el subarchivo rgn no ha sido leído
+            mapa=new Mapa_IMG();
+            nivel_real=corregir_nivel(nivel);
+            //rellena los parámetros del mapa
+            mapa.limites=limites;
+            mapa.nivel_detalle=nivel_real;
+            mapa.descripcion=descripcion_mapa;
+            mapa.nombre_archivo=this.ruta_archivo;
+            puntero_nivel=obtener_puntero_nivel(nivel_real);
+            if (puntero_nivel<0) return null; //nivel inexistente
+            n_bits=TRE.TRE1[puntero_nivel].bits_coordenada;
+            subdivisiones_visibles=new int[TRE.TRE1[puntero_nivel].subdivisiones]; //como máximo pueden ser visibles todas las del nivel
+            //recorre las subdivisiones del nivel
+            max_subdiv=TRE.TRE1[puntero_nivel].puntero_primera_subdivision+TRE.TRE1[puntero_nivel].subdivisiones;
+            for (contador=TRE.TRE1[puntero_nivel].puntero_primera_subdivision;contador<max_subdiv;contador++) {
+                //subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(contador); //en el vector la primera subdivisión es la 0
+                subdivision=TRE.TRE2[contador]; //en el vector la primera subdivisión es la 0
+                if (interseccion_subdivision_rectangulo(contador,limites)==true) { //área visible en la subdivisión
+                    subdivisiones_visibles[numero_subdivisiones_visibles]=contador; //guarda el número
+                    numero_subdivisiones_visibles++;
+                }
+                
+            }
+            if (numero_subdivisiones_visibles==0) return null; // no hay información visible con estos límites
+            for (contador=0;contador<numero_subdivisiones_visibles;contador++) {
+                //subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(subdivisiones_visibles[contador]); //en el vector la primera subdivisión es la 0
+                subdivision=TRE.TRE2[subdivisiones_visibles[contador]]; //en el vector la primera subdivisión es la 0
+                if (subdivision.objetos_puntos==true) {
+                    //comienzo de la sección de puntos de la subdivisión
+                    this.ajustar_puntero(RGN.puntero_puntos[subdivisiones_visibles[contador]]);
+                    while (this.puntero<RGN.final_puntos[subdivisiones_visibles[contador]]) {
+                        añadir_punto(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
+                    }
+                }
+                if (subdivision.objetos_puntos_indexados==true) {
+                    //comienzo de la sección de puntos indexados de la subdivisión
+                    this.ajustar_puntero(RGN.puntero_puntos_indexados[subdivisiones_visibles[contador]]);
+                    while (this.puntero<RGN.final_puntos_indexados[subdivisiones_visibles[contador]]) {
+                        añadir_punto(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
+                    }
+                }
+                if (subdivision.objetos_polilineas==true) {
+                    //comienzo de la sección de polilíneas de la subdivisión
+                    this.ajustar_puntero(RGN.puntero_polilineas[subdivisiones_visibles[contador]]);
+                    while (this.puntero<RGN.final_polilineas[subdivisiones_visibles[contador]]) {
+                        añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
+                    }
+                }
+                if (subdivision.objetos_poligonos==true) {
+                    //comienzo de la sección de polígonos de la subdivisión
+                    this.ajustar_puntero(RGN.puntero_poligonos[subdivisiones_visibles[contador]]);
+                    while (this.puntero<RGN.final_poligonos[subdivisiones_visibles[contador]]) {
+                        añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
+                    }
+                }
+                //if (contador%10==0) System.gc(); //libera memoria antes de pasar a la siguiente subdivisión
+            }
+            if (procesar_NET==true) { //proceso completo de etiquetas
+                procesar_etiquetas_NET(lista_etiquetas,lista_etiquetas_NET); //localiza las etiquetas situadas en el subarchivo NET
+                procesar_POIs(lista_etiquetas,lista_POIs);
+                
+            }
+            procesar_etiquetas_mapa(lista_etiquetas,mapa); //rellena las etiquetas
+            return mapa;
+/*        } catch (Throwable t) {
+            //probablemente la memoria se ha agotado. sale del bucle y devuelve lo que pueda
+            mapa=null;
+            System.gc();
+            cache_etiquetas.etiquetas=null;
+            cache_etiquetas_activado=false;
+            return null; 
+        } */
+    }
+    public Vector buscar(Tipo_Criterios_Busqueda criterios_busqueda) {
+        //busca en el nivel más detallado del mapa los elementos que
+        //cumplan los criterios indicados
+        byte n_bits;
+        int puntero_nivel_minimo; //índice del nivel de zoom más detallado
+        int max_subdiv; //última subdivisión del nivel a generar
+        int contador;
+        int tipo;
+        int nose;
         Tipo_Subdivisiones_TRE2 subdivision;
         Vector lista_etiquetas=new Vector();
         Vector lista_etiquetas_NET=new Vector();
         Vector lista_POIs=new Vector();
-        if (rgn_procesado==false) return null; //el subarchivo rgn no ha sido leído
-        Mapa_IMG mapa=new Mapa_IMG();
-        nivel_real=corregir_nivel(nivel);
-        //rellena los parámetros del mapa
-        mapa.limites=limites;
-        mapa.nivel_detalle=nivel_real;
-        mapa.descripcion=descripcion_mapa;
-        mapa.nombre_archivo=this.ruta_archivo;
-        puntero_nivel=obtener_puntero_nivel(nivel_real);
-        if (puntero_nivel<0) return null; //nivel inexistente
-        n_bits=TRE.TRE1[puntero_nivel].bits_coordenada;
-        subdivisiones_visibles=new int[TRE.TRE1[puntero_nivel].subdivisiones]; //como máximo pueden ser visibles todas las del nivel
+        Vector candidatos; //lista de elementos que pueden cumplir los criterios, a falta de obtener etiquetas
+        Vector resultados; //lista final de elementos que cumplen los criterios
+        Tipo_Punto punto;
+        String texto_etiqueta;
+        puntero_nivel_minimo=TRE.TRE1.length-1; //obtiene el nivel más detallado. en mapas normales debería ser el nivel 0
+        if (mapa_general==true) puntero_nivel_minimo--;
+        n_bits=TRE.TRE1[puntero_nivel_minimo].bits_coordenada;
+        candidatos=new Vector();
         //recorre las subdivisiones del nivel
-        max_subdiv=TRE.TRE1[puntero_nivel].puntero_primera_subdivision+TRE.TRE1[puntero_nivel].subdivisiones;
-        for (contador=TRE.TRE1[puntero_nivel].puntero_primera_subdivision;contador<max_subdiv;contador++) {
-            subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(contador); //en el vector la primera subdivisión es la 0
-            if (interseccion_subdivision_rectangulo(contador,limites)==true) { //área visible en la subdivisión
-                subdivisiones_visibles[numero_subdivisiones_visibles]=contador; //guarda el número
-                numero_subdivisiones_visibles++;
-            }
-            
-        }
-        if (numero_subdivisiones_visibles==0) return null; // no hay información visible con estos límites
-        for (contador=0;contador<numero_subdivisiones_visibles;contador++) {
-            subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(subdivisiones_visibles[contador]); //en el vector la primera subdivisión es la 0
-            if (subdivision.objetos_puntos==true) {
+        max_subdiv=TRE.TRE1[puntero_nivel_minimo].puntero_primera_subdivision+TRE.TRE1[puntero_nivel_minimo].subdivisiones;
+        for (contador=TRE.TRE1[puntero_nivel_minimo].puntero_primera_subdivision;contador<max_subdiv;contador++) {
+            //subdivision=(Tipo_Subdivisiones_TRE2) TRE.TRE2.elementAt(contador); //en el vector la primera subdivisión es la 0
+            subdivision=TRE.TRE2[contador]; //en el vector la primera subdivisión es la 0
+            //puntos. si se buscan ciudades, esta sección se evita, porque sólo deben aparecer en la de puntos indexados
+            if ((subdivision.objetos_puntos==true && criterios_busqueda.tipo_busqueda==criterios_busqueda.Tipo_Busqueda_Puntos && criterios_busqueda.incluir_tipo==false) || (subdivision.objetos_puntos==true && criterios_busqueda.tipo_busqueda==criterios_busqueda.Tipo_Busqueda_Puntos && criterios_busqueda.incluir_tipo==true && criterios_busqueda.tipo!=0)) {
                 //comienzo de la sección de puntos de la subdivisión
-                this.ajustar_puntero(RGN.puntero_puntos[subdivisiones_visibles[contador]]);
-                while (this.puntero<RGN.final_puntos[subdivisiones_visibles[contador]]) {
-                    añadir_punto(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
+                this.ajustar_puntero(RGN.puntero_puntos[contador]);
+                while (this.puntero<RGN.final_puntos[contador]) {
+                    //lee la información del punto
+                    punto=procesar_punto(n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
+                    if (criterios_busqueda.incluir_tipo==true) {
+                        //tipo=0000ttss tt=tipo, ss=subtipo
+                        tipo=punto.tipo>>8;
+                        if (criterios_busqueda.tipo==0) { //caso especial. las ciudades tienen tipo=0,1,..0x11 y subtipo 0
+                            if (tipo>0x11) continue;
+                        } else { //no se busca ciudad
+                            if (tipo!=criterios_busqueda.tipo) continue; //no es el tipo buscado
+                        }
+                    }
+                    //añade el punto al mapa
+                    //si hay etiqueta, la añade
+                    crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
+                    //añade el punto a la lista de candidatos
+                    candidatos.addElement(punto);
                 }
             }
-            if (subdivision.objetos_puntos_indexados==true) {
-                //comienzo de la sección de puntos indexados de la subdivisión
-                this.ajustar_puntero(RGN.puntero_puntos_indexados[subdivisiones_visibles[contador]]);
-                while (this.puntero<RGN.final_puntos_indexados[subdivisiones_visibles[contador]]) {
-                    añadir_punto(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
+            //puntos indexados
+            if (subdivision.objetos_puntos_indexados==true && criterios_busqueda.tipo_busqueda==criterios_busqueda.Tipo_Busqueda_Puntos) {
+                //comienzo de la sección de puntos indexasdos de la subdivisión
+                this.ajustar_puntero(RGN.puntero_puntos_indexados[contador]);
+                while (this.puntero<RGN.final_puntos_indexados[contador]) {
+                    //lee la información del punto
+                    punto=procesar_punto(n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
+                    if (criterios_busqueda.incluir_tipo==true) {
+                        //tipo=0000ttss tt=tipo, ss=subtipo
+                        tipo=punto.tipo>>8;
+                        if (criterios_busqueda.tipo==0) { //caso especial. las ciudades tienen tipo=0,1,..0x11 y subtipo 0
+                            if (tipo>0x11) continue;
+                        } else { //no se busca ciudad
+                            if (tipo!=criterios_busqueda.tipo) continue; //no es el tipo buscado
+                        }
+                    }
+                    //añade el punto al mapa
+                    //si hay etiqueta, la añade
+                    crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
+                    //añade el punto a la lista de candidatos
+                    candidatos.addElement(punto);
                 }
             }
-            if (subdivision.objetos_polilineas==true) {
-                //comienzo de la sección de polilíneas de la subdivisión
-                this.ajustar_puntero(RGN.puntero_polilineas[subdivisiones_visibles[contador]]);
-                while (this.puntero<RGN.final_polilineas[subdivisiones_visibles[contador]]) {
-                    añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
-                }
-            }
-            if (subdivision.objetos_poligonos==true) {
-                //comienzo de la sección de polígonos de la subdivisión
-                this.ajustar_puntero(RGN.puntero_poligonos[subdivisiones_visibles[contador]]);
-                while (this.puntero<RGN.final_poligonos[subdivisiones_visibles[contador]]) {
-                    añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
-                }
-            }
-            System.gc(); //libera memoria antes de pasar a la siguiente subdivisión
+            //if (contador%100==0) System.gc(); //libera es espacio ocupado por la subdivisión
         }
-        if (procesar_NET==true) { //proceso completo de etiquetas
+        if (candidatos.size()==0) return null; //no hay candidatos
+        resultados=new Vector();
+        try {
             procesar_etiquetas_NET(lista_etiquetas,lista_etiquetas_NET); //localiza las etiquetas situadas en el subarchivo NET
             procesar_POIs(lista_etiquetas,lista_POIs);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        } //localiza las etiquetas situadas en el subarchivo NET
+        
+        //procesar_etiquetas_mapa(lista_etiquetas,mapa); //rellena las etiquetas
+        //ordena la lista de menor a mayor offset, para que el puntero de archivo no tenga que retroceder
+        ordenar_lista_por_puntero_etiqueta(lista_etiquetas,0,lista_etiquetas.size()-1);
+        //rellena las etiquetas
+        Tipo_Etiqueta etiqueta;
+        int valor_int;
+        for (contador=lista_etiquetas.size()-1;contador>=0;contador--) {
+            etiqueta=(Tipo_Etiqueta)(lista_etiquetas.elementAt(contador));
+            if (etiqueta.nombre_completo.compareTo("")==0) { //si la etiqueta no está definida
+                try {
+                    valor_int=leer_etiqueta(etiqueta);
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    //memoria agotada
+                    break;
+                }
+            }
+            //if (contador%100==0) System.gc();
         }
-        procesar_etiquetas_mapa(lista_etiquetas,mapa); //rellena las etiquetas
-        return mapa;
+        //busca entre los candidatos los que contengan la cadena indicada
+        for (contador=0;contador<candidatos.size();contador++) {
+            punto=(Tipo_Punto)candidatos.elementAt(contador);
+            if (punto.es_POI==false) { //etiqueta en un lugar u otro dependiendo de si es POI o nó
+                if (punto.etiqueta==null) continue;
+                texto_etiqueta=punto.etiqueta.nombre_completo;
+            } else {
+                if (punto.etiqueta_POI.etiquetas[0]==null) continue;
+                texto_etiqueta=punto.etiqueta_POI.etiquetas[0].nombre_completo;
+            }
+            
+            if (texto_etiqueta.toLowerCase().indexOf(criterios_busqueda.texto.toLowerCase())!=-1) { //texto contenido en la etiqueta
+                resultados.addElement(new Tipo_Resultado_Busqueda(punto.longitud,punto.latitud,texto_etiqueta));
+            }
+        }
+        //System.gc();
+        if (resultados.size()==0) return null;
+        return resultados;
         
     }
     private void procesar_etiquetas_NET(Vector lista_etiquetas,Vector lista_etiquetas_NET) {
@@ -671,25 +815,6 @@ public class IMG_Parser {
         Tipo_Punto punto;
         Tipo_Etiqueta etiqueta;
         
-        //el acceso a la sección LBL del mapa debe hacerse evitando que el puntero vuelva
-        //hacia atrás, así que es necesario ordenar los punteros de etiqueta de menor a mayor
-        
-        /*
-        for (contador=mapa.Puntos.size()-1;contador>=0;contador--) { //primero, se recolectan los punteros
-            punto=(Tipo_Punto)(mapa.Puntos.elementAt(contador));
-            if (punto.es_POI==false ) {
-                lista_etiquetas.addElement(punto); //añade el punto a la lista
-            }
-        }
-        for (contador=mapa.Puntos_Indexados.size()-1;contador>=0;contador--) {
-            punto=(Tipo_Punto)(mapa.Puntos_Indexados.elementAt(contador));
-//            if (punto.es_POI==false && (punto.tipo<=0xc00 || mapa.nivel_detalle<2)) {
-                lista_etiquetas.addElement(punto); //añade el punto a la lista
-//            }
-        }
-         */
-        
-        
         
         //ordena la lista de menor a mayor offset, para que el puntero de archivo no tenga que retroceder
         ordenar_lista_por_puntero_etiqueta(lista_etiquetas,0,lista_etiquetas.size()-1);
@@ -701,8 +826,9 @@ public class IMG_Parser {
                 //si el caché está habilitado, añade la etiqueta ya procesada
                 if (this.cache_etiquetas_activado==true) cache_etiquetas.añadir_etiqueta(etiqueta);
             }
-            
         }
+        
+        
         
     }
     private static void ordenar_lista_por_puntero_etiqueta(Vector src, int left, int right) {
@@ -778,6 +904,23 @@ public class IMG_Parser {
         //toma el punto presente a partir del puntero actual del archivo y lo
         //añade al mapa dado. se usa la misma función para puntos normales
         //y para puntos indexados
+        Tipo_Punto punto;
+        //lee la información del punto
+        punto=procesar_punto(n_bits,centro_longitud,centro_latitud);
+        //añade el punto al mapa
+        if (punto_interior(punto.longitud,punto.latitud,mapa.limites)==false)  return; //si el punto se sale, no se añade
+        //si hay etiqueta, la añade
+        crear_etiqueta_punto(punto,lista_etiquetas,lista_POIs);
+        //añade el punto a la lista
+        if (indexado==false) {
+            mapa.Puntos.addElement(punto);
+        } else {
+            mapa.Puntos_Indexados.addElement(punto);
+        }
+    }
+    private Tipo_Punto procesar_punto(byte n_bits,float centro_longitud,float centro_latitud) {
+        //lee la información del punto marcado por el puntero de archivo
+        Tipo_Punto punto;
         int tipo=0;
         int subtipo=0;
         int puntero_etiqueta;
@@ -786,12 +929,12 @@ public class IMG_Parser {
         boolean es_POI=false;
         boolean tiene_subtipo=false;
         int valor_int;
-        Tipo_Etiqueta etiqueta=null;
-        Tipo_Etiqueta_NET etiqueta_POI=null;
         tipo=leer_byte();
         puntero_etiqueta=leer_trio();
         if ((puntero_etiqueta & 0x800000)!=0) tiene_subtipo=true; //bit de subtipo
-        if ((puntero_etiqueta & 0x400000)!=0) es_POI=true; //bit de POI
+        if ((puntero_etiqueta & 0x400000)!=0) {
+            es_POI=true; //bit de POI
+        }
         puntero_etiqueta &=0x3fffff;
         valor_int=leer_palabra();
         if (valor_int>=32768) valor_int-=65536; //corrige el signo negativo
@@ -801,23 +944,24 @@ public class IMG_Parser {
         latitud=centro_latitud+unidades_2_latlon(valor_int,n_bits);
         if (tiene_subtipo==true) subtipo=leer_byte();
         tipo=(tipo<<8)+subtipo;
-        //añade el punto al mapa
-        if (punto_interior(longitud,latitud,mapa.limites)==false)  return; //si el punto se sale, no se añade
-        //si hay etiqueta, la añade
-        if (es_POI==false) {
-            if (puntero_etiqueta!=0) {
-                etiqueta=crear_etiqueta_vacia(lista_etiquetas,puntero_etiqueta); //referencia a la etiqueta si no es un POI
+        punto=new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud,null,null);
+        return punto;
+    }
+    private void crear_etiqueta_punto(Tipo_Punto punto,Vector lista_etiquetas,Vector lista_POIs) {
+        //crea la etiqueta de un punto y completa con ella su definición
+        Tipo_Etiqueta etiqueta=null;
+        Tipo_Etiqueta_NET etiqueta_POI=null;
+        if (punto.es_POI==false) {
+            if (punto.puntero_etiqueta!=0) {
+                etiqueta=crear_etiqueta_vacia(lista_etiquetas,punto.puntero_etiqueta); //referencia a la etiqueta si no es un POI
             }
         } else {
-            etiqueta_POI=crear_POI_vacio(lista_POIs,puntero_etiqueta);
+            etiqueta_POI=crear_POI_vacio(lista_POIs,punto.puntero_etiqueta);
         }
-        //añade el punto a la lista
-        if (indexado==false) {
-            mapa.Puntos.addElement(new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud,etiqueta,etiqueta_POI));
-        } else {
-            mapa.Puntos_Indexados.addElement(new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud,etiqueta,etiqueta_POI));
-        }
+        punto.etiqueta=etiqueta;
+        punto.etiqueta_POI=etiqueta_POI;
     }
+    
     private boolean punto_interior(float longitud,float latitud,Tipo_Rectangulo limites) {
         //devuelve true si el punto dado está contenido en los límites
         if (longitud>=limites.oeste && longitud<=limites.este && latitud>=limites.sur && latitud<=limites.norte) {
@@ -1194,7 +1338,7 @@ public class IMG_Parser {
         }
         return 0; //etiqueta leída sin problemas
     }
-    private int leer_etiqueta_6(Tipo_Etiqueta etiqueta){
+    private int leer_etiqueta_6(Tipo_Etiqueta etiqueta) {
         //lee una etiqueta con caracteres de 6 bits
         String caracteres_mayusculas= " ABCDEFGHIJKLMNOPQRSTUVWXYZ~~~~~0123456789~~~~~~";
         String caracteres_simbolos= "@!\"#$%&'()*+,-./~~~~~~~~~~:;<=>?~~~~~~~~~~~[\\]^_";
@@ -1258,7 +1402,7 @@ public class IMG_Parser {
         }
         return 0; //etiqueta leída sin problemas
     }
-    private int leer_etiqueta_8(Tipo_Etiqueta etiqueta){
+    private int leer_etiqueta_8(Tipo_Etiqueta etiqueta) {
         //lee una etiqueta con caracteres de 6 bits
         String caracteres_mayusculas= " ABCDEFGHIJKLMNOPQRSTUVWXYZ~~~~~0123456789~~~~~~";
         String caracteres_simbolos= "@!\"#$%&'()*+,-./~~~~~~~~~~:;<=>?~~~~~~~~~~~[\\]^_";
@@ -1581,7 +1725,8 @@ public class IMG_Parser {
         boolean contenido_X=false;
         boolean contenido_Y=false;
         Tipo_Subdivisiones_TRE2 subdiv;
-        subdiv=(Tipo_Subdivisiones_TRE2)TRE.TRE2.elementAt(n_subdiv);
+        //subdiv=(Tipo_Subdivisiones_TRE2)TRE.TRE2.elementAt(n_subdiv);
+        subdiv=TRE.TRE2[n_subdiv];
         if ((rectangulo.oeste>=subdiv.limite_oeste && rectangulo.oeste<=subdiv.limite_este) ||
                 (rectangulo.este>=subdiv.limite_oeste && rectangulo.este<=subdiv.limite_este) ||
                 (subdiv.limite_oeste>=rectangulo.oeste && subdiv.limite_oeste<=rectangulo.este) ||
@@ -1639,6 +1784,7 @@ public class IMG_Parser {
         return etiqueta;
         
     }
+    
     //estructuras de subarchivos y subestructuras
     private class Tipo_Subarchivo { //clase interna para manejo de los subarchivos
         int bloque_inicial;
@@ -1660,7 +1806,8 @@ public class IMG_Parser {
         int numero_subdivisiones;
         Tipo_Niveles_TRE1 [] TRE1;
         int indice_maximo_nivel_con_geometria; //puntero al nivel de menos detalle que tiene geometría
-        Vector TRE2;
+        //Vector TRE2;
+        Tipo_Subdivisiones_TRE2 [] TRE2;
     }
     private class Tipo_RGN { //punteros a las áreas de datos de cada subdivisión
         int [] puntero_puntos; //posición absoluta dentro del archivo IMG

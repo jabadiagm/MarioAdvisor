@@ -44,6 +44,7 @@ public class BTConnector implements Runnable, DiscoveryListener {
     private boolean isSearching = false;
     private boolean isServiceSearching = false;
     private boolean doneServiceSearching = false;
+    private String last_error; //text of the last exception
 
     public BTConnector(){
         Thread t = new Thread(this);
@@ -123,6 +124,7 @@ public class BTConnector implements Runnable, DiscoveryListener {
                 try{
                     wait();
                 }catch(Exception e){
+                    last_error=e.toString();
                 }
             }
 
@@ -130,7 +132,9 @@ public class BTConnector implements Runnable, DiscoveryListener {
             isServiceSearching = true;
            transactionID = discoveryAgent.searchServices(null, uuidSet, remoteDevice, this);
         } catch (Exception e) {
+            last_error=e.toString();
             System.err.println("Can't initialize bluetooth: " + e);
+            
         }
     }
 
@@ -139,12 +143,13 @@ public class BTConnector implements Runnable, DiscoveryListener {
  
         try{
             deviceNames[index] = btDevice.getFriendlyName(false); // Store the name of the device
-System.out.println(index + " : " + deviceNames[index]);
+            System.out.println(index + " : " + deviceNames[index]);
             index++; // keep track on how many devices are found.
             devices.addElement(btDevice); // store the device
         }catch(Exception e){
             // If the btDevice is unknown, don't add it to the list.
             System.out.println("Failed to get FriendlyName");
+            last_error=e.toString();
         }
     }
 
@@ -165,4 +170,8 @@ System.out.println(index + " : " + deviceNames[index]);
         isSearching = false;
         doneSearching = true;
     }
+    public String get_last_error(){
+        return last_error;
+    }
+    
 }
