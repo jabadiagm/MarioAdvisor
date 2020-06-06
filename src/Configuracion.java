@@ -39,7 +39,6 @@ public class Configuracion {
     private OutputStream stream_configuracion_salida;
     public String [] raices;//raíces del sistema de archivos del equipo
     //variables de trabajo del programa
-    public final boolean depuracion=false; //true para pruebas
     public boolean pantalla_completa=true; //arranque
     //gotland
     //public float centro_longitud_inicial=18.3f;
@@ -62,6 +61,9 @@ public class Configuracion {
     public int factor_mapa;//=3;
     public int detalle_minimo_mapa_general;//=3; //nivel a partir del cual sólo dibuja mapas genéricos. si es <0, desactiva el uso de mapas generales
     public String GPS_url;//="btspp://00027815ECBB:1;authenticate=false;encrypt=false;master=true"; //ruta de conexión del GPS
+    public int tamaño_cache_mapas=1;
+    public boolean cache_etiquetas=true;
+    public final boolean depuracion=false; //true para pruebas
     
     /** Creates a new instance of Configuracion */
     public Configuracion() {
@@ -94,7 +96,7 @@ public class Configuracion {
                 raices[contador]+="/";
             }
         }
-        for (contador=0;contador<raices.length;contador++) {
+        for (contador=raices.length-1;contador>=0;contador--) {
             raiz = raices[contador];
             try {
                 carpeta_archivos=(FileConnection)Connector.open(raiz+nombre_carpeta_archivos+"/",Connector.READ);
@@ -113,10 +115,10 @@ public class Configuracion {
                         return estado;
                     }
                 }
-            } catch (IOException ex) {
-                ex.printStackTrace();
-                estado=this.Estado_Error_Carpeta_Archivos_Inexistente;
-                return estado;
+            } catch (Exception ex) {
+                //ex.printStackTrace();
+                //estado=this.Estado_Error_Carpeta_Archivos_Inexistente;
+                //return estado;
             }
             
         }
@@ -128,11 +130,11 @@ public int crear_carpeta_datos (int indice_raiz) {
     FileConnection ruta_configuracion;
     if (raices==null) return 1; // el objeto está sin inicializar o hay algún problema obteniendo las raíces
     try {
-        ruta_configuracion=(FileConnection)Connector.open(raices[indice_raiz]+this.nombre_carpeta_archivos);
+        ruta_configuracion=(FileConnection)Connector.open(raices[indice_raiz]+this.nombre_carpeta_archivos+"/");
         ruta_configuracion.mkdir();
         ruta_configuracion.close();
         return 0; //carpeta creada con éxito
-    } catch (IOException ex) {
+    } catch (Exception ex) {
         ex.printStackTrace();
         return 2; //error el la creación de carpeta
     } 
@@ -144,9 +146,10 @@ public int cargar_configuracion_defecto() {
     this.centro_latitud_inicial=0;
     this.nivel_zoom_inicial=10;
     this.detalle_minimo_mapa_general=3;
-    this.factor_mapa=3;
+    this.factor_mapa=2;
     this.pantalla_completa=false;
     this.GPS_url="";
+    this.tamaño_cache_mapas=1;
     //define el nombre del archivo para poder guardarlo
     this.ruta_archivo_configuracion=this.ruta_carpeta_archivos+this.nombre_archivo_configuracion;
 
@@ -211,6 +214,8 @@ private int procesar_configuracion(String [] nombres_parametros,String [] valore
                     this.factor_mapa=Integer.valueOf(valores_parametros[contador]).intValue();
                 } else if (nombres_parametros[contador].compareTo("OVERVIEW MAP DETAIL")==0) {
                     this.detalle_minimo_mapa_general=Integer.valueOf(valores_parametros[contador]).intValue();
+                }  else if (nombres_parametros[contador].compareTo("MAPS CACHE SIZE")==0) {
+                    this.tamaño_cache_mapas=Integer.valueOf(valores_parametros[contador]).intValue();
                 }
             }
         }
@@ -305,13 +310,15 @@ public int guardar_configuracion() {
         escribir_linea(cadena);
         cadena="OVERVIEW MAP DETAIL="+new Integer(this.detalle_minimo_mapa_general).toString();
         escribir_linea(cadena);
+        cadena="MAPS CACHE SIZE="+new Integer(this.tamaño_cache_mapas).toString();
+        escribir_linea(cadena);
 
         
         stream_configuracion_salida.close();
         archivo_configuracion.close();
         estado= this.Estado_OK;
         return estado;
-    } catch (IOException ex) {
+    } catch (Exception ex) {
         ex.printStackTrace();
         estado=this.Estado_Error_Acceso_Archivos;
         return estado;
@@ -321,4 +328,5 @@ private void escribir_linea(String linea) throws IOException {
     linea=linea+(char)13+(char)10; //añade fin de línea
     stream_configuracion_salida.write(linea.getBytes());
 }
+ 
 }

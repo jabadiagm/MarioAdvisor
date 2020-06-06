@@ -14,12 +14,14 @@
 public class Tipo_Poli {
     public int tipo; //tipo+subtipo en bytes 1 y 0 del entero
     public int offset_etiqueta;
-    public String etiqueta;
+    //public String etiqueta;
     public float[] puntos_X;
     public float[] puntos_Y;
     public boolean[] punto_es_nodo;
     public boolean sentido_unico; //calle de una sola dirección
     public boolean datos_en_NET;
+    public Tipo_Etiqueta etiqueta;
+    public Tipo_Etiqueta_NET etiqueta_NET;
     
     /** Creates a new instance of Tipo_Poli */
     public Tipo_Poli(int tipo_poly,int offset,float[] X,float [] Y) {

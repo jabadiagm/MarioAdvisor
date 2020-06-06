@@ -19,6 +19,7 @@ public class Visor_IMG extends MIDlet implements CommandListener{
     private IMG_Canvas img_Canvas;
     private Configuracion configuracion;
     private Config_Canvas config_canvas;
+    private BT_Canvas bt_canvas;
     //variables para el formulario de creación de carpeta
     public Form formulario_carpeta; //selección del directorio de trabajo
     private ChoiceGroup seleccion_raiz;
@@ -70,12 +71,12 @@ public class Visor_IMG extends MIDlet implements CommandListener{
     public void startApp() {
         int retorno;
         int contador;
-        Alert mensaje;
         if (configuracion.estado!=configuracion.Estado_Pendiente_Leer_Configuracion) { //error al cargar el objeto configuración
             notifyDestroyed();
             return;
         }
         retorno=configuracion.inicializar();
+        
         if (retorno==configuracion.Estado_OK) { //listo para comenzar
             arrancar_img_canvas();
         } else { //fallo al cargar la configuración.muestra el formulario
@@ -107,9 +108,16 @@ public class Visor_IMG extends MIDlet implements CommandListener{
     }
     public void mostrar_img_canvas() {
         if (config_canvas!=null) config_canvas=null; //si se viene del formulario de configuración se borra
+        if (bt_canvas!=null) bt_canvas=null; //si se viene del formulario de selección de GPS, se borra
         //muestra la pantallaprincipal
         if (img_Canvas.pausar==true) img_Canvas.pausar=false;
         pantalla.setCurrent(img_Canvas);
+    }
+    public void mostrar_BT_canvas() {
+        //muestra el formulario de selección de GPS bluetooth
+        if (bt_canvas==null) bt_canvas=new BT_Canvas(configuracion,this);
+        pantalla.setCurrent(bt_canvas.formulario_BT);
+        
     }
     public void pauseApp() {
     }
@@ -119,7 +127,6 @@ public class Visor_IMG extends MIDlet implements CommandListener{
     
     public void commandAction(Command command, Displayable displayable) {
         int retorno;
-        Alert mensaje;
         if (command==cmd_salir) {
             this.exitMIDlet();
         } else if (command==cmd_crear_carpeta) {

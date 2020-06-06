@@ -1,8 +1,10 @@
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Enumeration;
 import java.util.Vector;
 import javax.microedition.io.Connector;
 import javax.microedition.io.file.FileConnection;
+import javax.microedition.lcdui.Font;
 import javax.microedition.lcdui.Graphics;
 import javax.microedition.lcdui.Image;
 
@@ -23,21 +25,24 @@ public  class Gestor_Mapas {
     //valores permitidos de zoom, en metros. un valor de zoom representa la quinta parte de la latitud visible en el mapa
     private int [] zoom={12,20,30,50,80,120,200,300,500,800,1200,2000,3000,5000,8000,12000,20000,30000,50000,80000,120000,200000,300000,500000,800000};
     //nivel de detalle recomendado para cada nivel de zoom (cuanto más bajo, más detalle se permite)
-    private int [] detalle={0,0,0,0,0,0,0,0,1,1,1,2,2,3,3,4,4,4,5,5,5,5,5,6,6,7};
+    private int [] detalle={0,0,0,0,0,0,0,1,1,1,2,2,3,3,3,4,4,4,5,5,5,5,5,6,6,7};
     private int detalle_minimo_mapa_general; //nivel a partir del cual sólo dibuja mapas genéricos
     private IMG_Parser archivo_IMG;
     private String [] lista_mapas;
     private Tipo_Rectangulo [] limites_mapas;
     private boolean [] mapa_general; //true cuando hay un mapa general. si el zoom pedido es superior al mínimo, es el único que muestra
+    private boolean [] mapa_interno; //true cuando sea un archivo contenido en el jar
     private boolean mapa_general_presente;
     private boolean gestion_mapa_general_permitida=true;
     private FileConnection carpeta_archivos;
     private Cache_IMG cache;
     public int estado; //indica si está o no dispuesto a funcionar estado=0 : OK
-
+    private boolean cache_etiquetas_activado;
+    private String ruta_mapas_internos;
+    private Class clase; //acceso a los archivos internos
     
     /** Creates a new instance of Gestor_Mapas */
-    public Gestor_Mapas(String ruta_archivos,Graphics grafico,IMG_Canvas img_canvas,int detalle_minimo) {
+    public Gestor_Mapas(String ruta_archivos,Graphics grafico,IMG_Canvas img_canvas,int detalle_minimo,int tamaño_cache_mapas,Font fuente,boolean cache_etiquetas) {
         //rastrea la ruta indicada buscando archivos IMG. hace una lista con los presentes y
         //obtiene los límites de cada uno de ellos, para saber cuáles debe utilizar al
         //navegar.
@@ -48,9 +53,33 @@ public  class Gestor_Mapas {
         int retorno;
         int ancho_pantalla; 
         int alto_pantalla;
+        int altura_fuente;
+        int numero_mapas_internos; //mapas contenidos en el jar
         Image logo;
+        ruta_mapas_internos="/maps/";
+        clase=Runtime.getRuntime().getClass();
+
+        this.cache_etiquetas_activado=cache_etiquetas; //guarda la configuración del caché de etiquetas
         Vector vector_temporal=new Vector(); //buffer temporal para almecenar el resultado del DIR
-        cache=new Cache_IMG(); //lista de archivos abiertos listos para generar mapas
+        cache=new Cache_IMG(tamaño_cache_mapas); //lista de archivos abiertos listos para generar mapas
+        altura_fuente=fuente.getHeight(); //se usa para calcular la distancia entre líneas
+        ancho_pantalla=img_canvas.getWidth();
+        alto_pantalla=img_canvas.getHeight();
+        grafico.setFont(fuente);
+        grafico.setColor(0,0,0);
+        grafico.fillRect(0,0,ancho_pantalla,alto_pantalla);
+        try {
+            logo=Image.createImage("/logo.png");
+            grafico.drawImage(logo,ancho_pantalla/2,alto_pantalla/2,Graphics.HCENTER+Graphics.VCENTER);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        
+        img_canvas.flushGraphics(); //refresca la pantalla para que durante el proceso del primer mapa ya aparezca
+        
+        leer_mapas_internos(clase,vector_temporal); //busca primero mapas dentro del jar
+        numero_mapas_internos=vector_temporal.size();
+        
         try {
             /*
             nombre_plataforma=System.getProperty("microedition.platform");
@@ -64,7 +93,6 @@ public  class Gestor_Mapas {
                 gestion_mapa_general_permitida=false;
             }
             ruta_mapas=ruta_archivos;
-            
             carpeta_archivos=(FileConnection)Connector.open(ruta_mapas,Connector.READ);
             retorno_dir=carpeta_archivos.list("*.img",false);
             while (retorno_dir.hasMoreElements()==true) {
@@ -76,20 +104,21 @@ public  class Gestor_Mapas {
                 lista_mapas= new String[vector_temporal.size()];
                 limites_mapas=new Tipo_Rectangulo[vector_temporal.size()];
                 mapa_general=new boolean [vector_temporal.size()];
-                ancho_pantalla=img_canvas.getWidth();
-                alto_pantalla=img_canvas.getHeight();
-                grafico.setColor(0,0,0);
-                grafico.fillRect(0,0,ancho_pantalla,alto_pantalla);
-                logo=Image.createImage("/logo.png");
-                grafico.drawImage(logo,ancho_pantalla/2,alto_pantalla/2,Graphics.HCENTER+Graphics.VCENTER);
+                mapa_interno=new boolean [vector_temporal.size()];
                 //recorre los mapas y obtiene sus límites
-                for (contador=vector_temporal.size()-1;contador>=0;contador--) {
-                    lista_mapas[contador]=ruta_mapas+(String)vector_temporal.elementAt(contador);
-                    archivo_IMG=new IMG_Parser();
-                    retorno=archivo_IMG.abrir_mapa(lista_mapas[contador]);
+                for (contador=0;contador<vector_temporal.size();contador++) { //recorre la lista empezando por los mapas internos, si hay
+                    
+                    if (contador<numero_mapas_internos) {
+                        mapa_interno[contador]=true;
+                        lista_mapas[contador]=ruta_mapas_internos+(String)vector_temporal.elementAt(contador);
+                    } else {
+                        mapa_interno[contador]=false;
+                        lista_mapas[contador]=ruta_mapas+(String)vector_temporal.elementAt(contador);
+                    }
+                    archivo_IMG=new IMG_Parser(cache_etiquetas_activado);
+                    retorno=archivo_IMG.abrir_mapa(lista_mapas[contador],mapa_interno[contador],clase);
                     if (retorno!=0) {
-                        estado=2; //error abriendo archivo
-                        return;
+                        continue; //pasa al siguiente mapa
                     }
                     limites_mapas[contador]=archivo_IMG.leer_limites(detalle_minimo_mapa_general);
                     if ((gestion_mapa_general_permitida==true) && archivo_IMG.mapa_general==true) {
@@ -98,29 +127,75 @@ public  class Gestor_Mapas {
                     }
                     retorno=archivo_IMG.cerrar_mapa();
                     //reduce el área dibujable a la zona inferior, donde se va a escribir
-                    grafico.setClip(0,alto_pantalla-40,ancho_pantalla,40);
+                    grafico.setClip(0,alto_pantalla-2*altura_fuente,ancho_pantalla,2*altura_fuente); //las dos últimas líneas que ocupa la información de carga
                     grafico.setColor(0,0,0);
-                    grafico.fillRect(0,alto_pantalla-30,ancho_pantalla,alto_pantalla);
+                    grafico.fillRect(0,0,ancho_pantalla,alto_pantalla);
                     grafico.setColor(0xff,0xff,0xff);
-                    grafico.drawString("Loading "+archivo_IMG.descripcion_mapa,10,alto_pantalla-30,0);
-                    grafico.drawString(new Integer(contador).toString()+" maps left",10,alto_pantalla-20,0);
+                    grafico.drawString("Loading "+archivo_IMG.descripcion_mapa,10,alto_pantalla-altura_fuente,Graphics.BOTTOM | Graphics.LEFT);
+                    grafico.drawString(new Integer(lista_mapas.length-contador).toString()+" maps left",10,alto_pantalla,Graphics.BOTTOM | Graphics.LEFT);
                     img_canvas.flushGraphics();
+                    System.gc(); //limpieza de memoria para que no se cargue
                 }
                 grafico.setColor(0,0,0);
-                grafico.fillRect(0,alto_pantalla-30,ancho_pantalla,alto_pantalla);
+                grafico.fillRect(0,0,ancho_pantalla,alto_pantalla);
                 grafico.setColor(0xff,0xff,0xff);
                 grafico.drawString("Generating Map",10,alto_pantalla-30,0);
                 img_canvas.flushGraphics();
                 grafico.setClip(0,0,ancho_pantalla,alto_pantalla); //vuelve a usar toda la pantalla
             }
             
-        } catch (IOException ex) {
+        } catch (Exception ex) {
             estado=1; //error en el acceso a la ruta
             ex.printStackTrace();
         }
         
     }
-    public Mapa_IMG[] generar_mapa (Tipo_Rectangulo limites,int nivel_zoom){
+    private void leer_mapas_internos(Class clase,Vector mapas) {
+        //busca mapas en el jar y devuelve la lista de los encontrados
+        String linea;
+        InputStream lista_mapas; //stream al archivo con la lista de mapas.
+        lista_mapas=clase.getResourceAsStream("/maps/map_list.txt");
+        if (lista_mapas==null) return; //no hay lista
+        while (true) {
+            linea=leer_linea(lista_mapas);
+            if (linea.compareTo("")==0) break; //error de parseo o fin de archivo
+            mapas.addElement(linea);
+        }
+        try {
+            lista_mapas.close();
+            lista_mapas=null;
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        
+        
+
+        
+    }
+    private String leer_linea(InputStream archivo) {
+        //lee una línea de un archivo de texto
+        //lee caracteres hasta llegar a 0d 0a y devuelve los caracteres obtenidos
+        int retorno;
+        byte [] dato_byte=new byte [1];
+        String cadena="";
+        try {
+            while (true) {
+                retorno=archivo.read(dato_byte);
+                if (retorno==-1) return cadena; //fin de archivo. devuelve lo que tenga
+                if (dato_byte[0]==0x0d) break; //fin de línea
+                cadena+=(char)dato_byte[0];
+            }
+            //comprueba que el siguiente carácter es 0x0a
+            archivo.read(dato_byte);
+            if (dato_byte[0]!=0x0a) return ""; //archivo incorrecto
+            return cadena;
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return ""; //error de acceso a archivos
+        }
+        
+    }
+    public Mapa_IMG[] generar_mapa (Tipo_Rectangulo limites,int nivel_zoom,boolean procesar_NET){
         String ruta_mapa;
         String nombre_plataforma; //nombre de la máquina corriendo java
         int retorno;
@@ -151,24 +226,25 @@ public  class Gestor_Mapas {
                 if (detalle[nivel_zoom]>=detalle_minimo_mapa_general) {
                     //sólo procesará el mapa si es el general
                     if (mapa_general[mapas_visibles[contador]]==true) {
-                        archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]]);
-                        mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom]);
+                        archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]],mapa_interno[mapas_visibles[contador]],clase);
+                        mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom],procesar_NET);
                     } else {
                         mapas[contador]=null;
                     }
                 } else { //para detalles bajos, no procesa lor mapas generales
                     if (mapa_general[mapas_visibles[contador]]==false) {
-                        archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]]);
-                        mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom]);
+                        archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]],mapa_interno[mapas_visibles[contador]],clase);
+                        mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom],procesar_NET);
                     } else {
                         mapas[contador]=null;
                     }
                 }
             } else {
-                archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]]);
-                mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom]);
+                archivo_IMG=cache.abrir_archivo(lista_mapas[mapas_visibles[contador]],mapa_interno[mapas_visibles[contador]],clase);
+                mapas[contador]=archivo_IMG.generar_mapa(limites,(byte)detalle[nivel_zoom],procesar_NET);
                 
             }
+            System.gc();
         }
         return mapas;
     }
@@ -176,6 +252,7 @@ public  class Gestor_Mapas {
       //devuelve true si hay interferencia entre los dos rectángulos
       boolean contenido_X=false;
       boolean contenido_Y=false;
+      if (rectangulo1==null ||rectangulo2==null) return false;
       if ((rectangulo1.oeste>=rectangulo2.oeste && rectangulo1.oeste<=rectangulo2.este) || 
               (rectangulo1.este>=rectangulo2.oeste && rectangulo1.este<=rectangulo2.este) ||
               (rectangulo2.oeste>=rectangulo1.oeste && rectangulo2.oeste<=rectangulo1.este) ||
@@ -194,14 +271,14 @@ public  class Gestor_Mapas {
       private int [] puntuacion; //nº de accesos a cada archivo del caché
       private int numero_elementos; //nº de archivos abiertos. el máximo es la capacidad
       private String [] ruta_elementos; //ruta+nombre del archivo correspondiente
-      public Cache_IMG() { //
-          capacidad=8;
+      public Cache_IMG(int capacidad) { //
+          this.capacidad=capacidad;
           cache=new IMG_Parser[capacidad];
           puntuacion=new int[capacidad];
           ruta_elementos=new String[capacidad];
           numero_elementos=0;
       }
-      public IMG_Parser abrir_archivo(String nombre_archivo) {
+      public IMG_Parser abrir_archivo(String nombre_archivo,boolean mapa_interno,Class clase) {
           //comprueba si el archivo ya está en el caché
           int retorno;
           retorno=archivo_presente(nombre_archivo);
@@ -210,7 +287,7 @@ public  class Gestor_Mapas {
           }
           //archivo nuevo. hay que ver si cabe sin tener que cerrar elementos
           if (numero_elementos<capacidad) { //quedan huecos por rellenar
-              preprocesar(numero_elementos,nombre_archivo);
+              preprocesar(numero_elementos,nombre_archivo,mapa_interno,clase);
               numero_elementos++;
               return cache[numero_elementos-1];
           }
@@ -222,15 +299,15 @@ public  class Gestor_Mapas {
           ruta_elementos[retorno]=null;
           System.gc();  //intenta liberar memoria antes de abrir el nuevo archivo
           puntuacion[retorno]=0;
-          preprocesar(retorno,nombre_archivo);
+          preprocesar(retorno,nombre_archivo,mapa_interno,clase);
           return cache[retorno];
       }
-      private void preprocesar(int indice,String nombre_archivo) {
+      private void preprocesar(int indice,String nombre_archivo,boolean mapa_interno,Class clase) {
           //coloca el archivo indicado en el caché, y lo preprocesa
           int retorno;
-          cache[indice]=new IMG_Parser();
+          cache[indice]=new IMG_Parser(cache_etiquetas_activado);
           ruta_elementos[indice]=nombre_archivo;
-          retorno=cache[indice].abrir_mapa(nombre_archivo);
+          retorno=cache[indice].abrir_mapa(nombre_archivo,mapa_interno,clase);
           retorno=cache[indice].procesar_tre(detalle_minimo_mapa_general);
           retorno=cache[indice].procesar_rgn();
           puntuacion[indice]++;
@@ -270,5 +347,13 @@ public  class Gestor_Mapas {
   public int leer_detalle(int nivel_zoom) {
       //devuelve el detalle correspondiente a un nivel de zoom
       return detalle[nivel_zoom];
+  }
+  public Tipo_Rectangulo sugerir_coordenadas_iniciales () {
+      //devuelve los límites del primer mapa disponible, para el caso en que
+      //se arranque sin archivo de configuración, y aparezca el primer mapa
+      //centrado
+      if (limites_mapas==null) return null;
+      if (limites_mapas.length==0) return null;
+      return limites_mapas[0];
   }
 }

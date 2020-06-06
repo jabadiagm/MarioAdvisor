@@ -24,6 +24,7 @@ public class IMG_Parser {
     private boolean reset_soportado; //indica que se puede resetear el puntero del archivo sin cerrar y abrir
     private boolean archivo_abierto; //indica que hay un mapa cargado
     private boolean cabecera_tre_procesada=false; //indica que la cabecera y los niveles de zoom ya han sido leídos
+    private boolean cabecera_NET_procesada=false; //indica que los punteros al área de etiquetas de carretaras están cargados
     private boolean tre_procesado; //indica que la información de las subdivisiones ya ha sido leída
     private boolean rgn_procesado; //indica que los punteros dentro del subarchivo RGN han sido definidos
     private boolean lbl_procesado; //indica que la cabecera del subarchivo LBL ha sido leída
@@ -40,10 +41,16 @@ public class IMG_Parser {
     Tipo_TRE TRE;
     Tipo_RGN RGN;
     Tipo_LBL LBL;
+    Tipo_NET NET;
+    int contador_unos[]={0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4}; //número de unos que contiene el valor, en binario
+    boolean cache_etiquetas_activado;
+    private boolean mapa_interno; //cuando es interno no se usa la variable archivo_IMG
+    private Class clase; //acceso a los archivos del jar
+    Tipo_Cache_Etiquetas cache_etiquetas;
     int nose;
-    
+    int nose2[][]={{1,2},{3,4}};
     /** Creates a new instance of IMG_Parser */
-    public IMG_Parser() {
+    public IMG_Parser(boolean cache_etiquetas_activado) {
         tre=new Tipo_Subarchivo();
         lbl=new Tipo_Subarchivo();
         rgn=new Tipo_Subarchivo();
@@ -51,12 +58,17 @@ public class IMG_Parser {
         net=new Tipo_Subarchivo();
         TRE=new Tipo_TRE();
         LBL=new Tipo_LBL();
+        NET=new Tipo_NET();
+        this.cache_etiquetas_activado=cache_etiquetas_activado; //activa o no el cache de etiquetas en LBL
+        if (cache_etiquetas_activado==true) cache_etiquetas=new Tipo_Cache_Etiquetas();
+        
+        
     }
-
+    
     public String leer_ultimo_error(){
         return ultimo_error;
     }
-    public int abrir_mapa(String ruta_mapa) {
+    public int abrir_mapa(String ruta_mapa,boolean mapa_interno,Class clase) {
         //intenta abrir el archivo especificado y leer su cabecera
         int e1,e2;
         int valor_int=1;
@@ -69,14 +81,25 @@ public class IMG_Parser {
         int fat_bloque_final=0;
         int posicion_fat;
         String tipo_subarchivo_anterior="";
-        
+        this.mapa_interno=mapa_interno;
+        this.clase=clase;
         try {
-            archivo_IMG = (FileConnection) Connector.open(ruta_mapa,Connector.READ);
-            if (!archivo_IMG.exists()) {
-                ultimo_error="El archivo no existe";
-                return 2;
+            if (mapa_interno==false) { //hay que abrir una conexión al archivo
+                archivo_IMG = (FileConnection) Connector.open(ruta_mapa,Connector.READ);
+                if (!archivo_IMG.exists()) {
+                    ultimo_error="El archivo no existe";
+                    return 2;
+                }
+                stream_IMG=archivo_IMG.openInputStream();
+                mapa_interno=false; //guarda la información para cuando haya que cerrarlo
+            } else {
+                mapa_interno=true;
+                stream_IMG=clase.getResourceAsStream(ruta_mapa);
+                if (stream_IMG==null) {
+                    ultimo_error="El archivo no existe";
+                    return 2;
+                }
             }
-            stream_IMG=archivo_IMG.openInputStream();
             if (stream_IMG.markSupported()==false) {
                 reset_soportado=false;
                 //ultimo_error="No se permite el reinicio del puntero de archivo";
@@ -179,7 +202,9 @@ public class IMG_Parser {
         }
         try {
             stream_IMG.close();
-            archivo_IMG.close();
+            if (mapa_interno==false) archivo_IMG.close();
+            archivo_IMG=null; //libera la memoria ocupada por los objetos
+            stream_IMG=null;
         } catch (IOException ex) {
             ultimo_error="Error de entrada/salida";
             return 2;
@@ -190,7 +215,7 @@ public class IMG_Parser {
     }
     private int procesar_cabecera_tre(int detalle_general){
         //lee los límites del mapa actual y loz niveles de zoom
-        //detalle_general es el valor a partir del cual se dibuja el plano general. 
+        //detalle_general es el valor a partir del cual se dibuja el plano general.
         //si el mapa general tiene niveles con menor zoom, se ajustan para que no haya solapes
         
         int tamaño_cabecera;
@@ -240,9 +265,9 @@ public class IMG_Parser {
         return frontera;
     }
     public int procesar_tre(int detalle_general){
-        //carga la información de los niveles de zoom y las subdivisiones, 
+        //carga la información de los niveles de zoom y las subdivisiones,
         //leyendo el contenido del subarchivo tre
-        //detalle_general es el valor a partir del cual se dibuja el plano general. 
+        //detalle_general es el valor a partir del cual se dibuja el plano general.
         //si el mapa general tiene niveles con menor zoom, se ajustan para que no haya solapes
         int valor_int;
         if (cabecera_tre_procesada==false) {
@@ -250,7 +275,7 @@ public class IMG_Parser {
             if (valor_int!=0) return valor_int; //archivo no abierto ó error de acceso
         }
         //asigna espacio para TRE2
-        TRE.TRE2=new Vector(TRE.tamaño_subdivisiones_TRE2/14); //tamaño aproximado (algo mayor) de la sección de subdivisiones
+        TRE.TRE2=new Vector();//TRE.tamaño_subdivisiones_TRE2/14); //tamaño aproximado (algo mayor) de la sección de subdivisiones
         rellenar_TRE2();
         tre_procesado=true;
         ultimo_error="";
@@ -277,7 +302,7 @@ public class IMG_Parser {
             TRE.numero_subdivisiones=subdivisiones_acumuladas;
             if (TRE.TRE1[contador].zoom<zoom_minimo) zoom_minimo=TRE.TRE1[contador].zoom;
             //ajusta el zoom mínimo
-            }
+        }
         if (zoom_minimo>0) { //mapa general
             this.mapa_general=true;
             if (zoom_minimo<detalle_general) { //hay que corregir los niveles de zoom
@@ -340,9 +365,10 @@ public class IMG_Parser {
                     subdivision.subdivision_siguiente_nivel=leer_palabra(); //información presente en todos los ni veles menos el último
                 }
                 TRE.TRE2.addElement(subdivision); //añade la información al vector de subdivisiones
-                        
+                if (contador2%100==0) System.gc(); //libera memoria para que no se cargue
+                
             }
-          
+            
         }
     }
     public int procesar_rgn() {
@@ -398,21 +424,21 @@ public class IMG_Parser {
                 RGN.final_puntos[contador]=punteros[numero_secciones+1]-1;
                 numero_secciones++;
             }
-             if (subdivision.objetos_puntos_indexados==true) {
+            if (subdivision.objetos_puntos_indexados==true) {
                 RGN.puntero_puntos_indexados[contador]=punteros[numero_secciones];
                 RGN.final_puntos_indexados[contador]=punteros[numero_secciones+1]-1;
                 numero_secciones++;
-            }           
+            }
             if (subdivision.objetos_polilineas==true) {
                 RGN.puntero_polilineas[contador]=punteros[numero_secciones];
                 RGN.final_polilineas[contador]=punteros[numero_secciones+1]-1;
                 numero_secciones++;
-            }            
+            }
             if (subdivision.objetos_poligonos==true) {
                 RGN.puntero_poligonos[contador]=punteros[numero_secciones];
                 RGN.final_poligonos[contador]=punteros[numero_secciones+1]-1;
                 numero_secciones++;
-            }            
+            }
         }
         rgn_procesado=true;
         ultimo_error="";
@@ -427,14 +453,14 @@ public class IMG_Parser {
             ultimo_error="No hay ningún mapa cargado.";
             return 1;
         }
-        //coloca el puntero en el comienzo del subarchivo TRE
+        //coloca el puntero en el comienzo del subarchivo LBL
         this.ajustar_puntero(lbl.puntero_inicio);
         tamaño_cabecera=leer_palabra();
         cadena=leer_cadena(10);
         if (cadena.substring(0,6).compareTo("GARMIN")!=0) {
             ultimo_error="Error de parseo";
             return 2;
-        }        
+        }
         valor_byte=leer_byte();
         valor_byte=leer_byte();
         if (valor_byte==0x80) { //mapa bloqueado, no se puede leer
@@ -479,8 +505,38 @@ public class IMG_Parser {
         this.lbl_procesado=true;
         return 0;
     }
-    
-    public Mapa_IMG generar_mapa(Tipo_Rectangulo limites, byte nivel) {
+    private int procesar_cabecera_NET() {
+        int tamaño_cabecera;
+        int valor_int;
+        byte valor_byte;
+        String cadena;
+        if (archivo_abierto==false) {
+            ultimo_error="No hay ningún mapa cargado.";
+            return 1;
+        }
+        //coloca el puntero en el comienzo del subarchivo NET
+        this.ajustar_puntero(net.puntero_inicio);
+        tamaño_cabecera=leer_palabra();
+        cadena=leer_cadena(10);
+        if (cadena.substring(0,6).compareTo("GARMIN")!=0) {
+            ultimo_error="Error de parseo";
+            return 2;
+        }
+        valor_byte=leer_byte();
+        valor_byte=leer_byte();
+        if (valor_byte==0x80) { //mapa bloqueado, no se puede leer
+            ultimo_error="Archivo bloqueado.";
+            return 3;
+        }
+        this.avanzar_puntero(7); //salto al comienzo de los punteros NET
+        NET.NET1_definiciones_carreteras_offset=leer_quad();
+        NET.NET1_definiciones_carreteras_tamaño=leer_quad();
+        NET.NET1_definiciones_carreteras_multiplicador_offset=leer_byte_int();
+        this.cabecera_NET_procesada=true;
+        return 0;
+        
+    }
+    public Mapa_IMG generar_mapa(Tipo_Rectangulo limites, byte nivel,boolean procesar_NET) {
         //devuelve todos los elementos gráficos contenidos en el rectángulo dado
         //y que pertenezcan el nivel de detalle indicado.
         //para ello busca intersecciones con todas las subdivisiones del nivel.
@@ -492,6 +548,9 @@ public class IMG_Parser {
         int max_subdiv; //última subdivisión del nivel a generar
         byte n_bits; //número de bits del nivel actual
         Tipo_Subdivisiones_TRE2 subdivision;
+        Vector lista_etiquetas=new Vector();
+        Vector lista_etiquetas_NET=new Vector();
+        Vector lista_POIs=new Vector();
         if (rgn_procesado==false) return null; //el subarchivo rgn no ha sido leído
         Mapa_IMG mapa=new Mapa_IMG();
         nivel_real=corregir_nivel(nivel);
@@ -521,43 +580,101 @@ public class IMG_Parser {
                 //comienzo de la sección de puntos de la subdivisión
                 this.ajustar_puntero(RGN.puntero_puntos[subdivisiones_visibles[contador]]);
                 while (this.puntero<RGN.final_puntos[subdivisiones_visibles[contador]]) {
-                    añadir_punto(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
+                    añadir_punto(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
                 }
             }
             if (subdivision.objetos_puntos_indexados==true) {
                 //comienzo de la sección de puntos indexados de la subdivisión
                 this.ajustar_puntero(RGN.puntero_puntos_indexados[subdivisiones_visibles[contador]]);
                 while (this.puntero<RGN.final_puntos_indexados[subdivisiones_visibles[contador]]) {
-                    añadir_punto(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
+                    añadir_punto(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_POIs);
                 }
             }
             if (subdivision.objetos_polilineas==true) {
                 //comienzo de la sección de polilíneas de la subdivisión
                 this.ajustar_puntero(RGN.puntero_polilineas[subdivisiones_visibles[contador]]);
                 while (this.puntero<RGN.final_polilineas[subdivisiones_visibles[contador]]) {
-                    añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
+                    añadir_poli(false,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
                 }
             }
             if (subdivision.objetos_poligonos==true) {
                 //comienzo de la sección de polígonos de la subdivisión
                 this.ajustar_puntero(RGN.puntero_poligonos[subdivisiones_visibles[contador]]);
                 while (this.puntero<RGN.final_poligonos[subdivisiones_visibles[contador]]) {
-                    añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud);
+                    añadir_poli(true,mapa,n_bits,subdivision.centro_longitud,subdivision.centro_latitud,lista_etiquetas,lista_etiquetas_NET);
                 }
             }
+            System.gc(); //libera memoria antes de pasar a la siguiente subdivisión
         }
-        procesar_etiquetas_mapa(mapa); //rellena las etiquetas
+        if (procesar_NET==true) { //proceso completo de etiquetas
+            procesar_etiquetas_NET(lista_etiquetas,lista_etiquetas_NET); //localiza las etiquetas situadas en el subarchivo NET
+            procesar_POIs(lista_etiquetas,lista_POIs);
+        }
+        procesar_etiquetas_mapa(lista_etiquetas,mapa); //rellena las etiquetas
         return mapa;
         
     }
-    private void procesar_etiquetas_mapa(Mapa_IMG mapa) {
+    private void procesar_etiquetas_NET(Vector lista_etiquetas,Vector lista_etiquetas_NET) {
+        //ordena las etiquetas para mejorar el tiempo de acceso, y luego
+        //lee en la sección NET las etiquetas correspondientes
+        int valor_int;
+        int contador;
+        Tipo_Etiqueta_NET etiqueta;
+        if (cabecera_NET_procesada==false) {
+            valor_int=procesar_cabecera_NET();
+            if (valor_int!=0) return; //si hay algún error, ya no sigue
+        }
+        //ordena la lista
+        ordenar_lista_NET_por_puntero_etiqueta(lista_etiquetas_NET,0,lista_etiquetas_NET.size()-1);
+        //recorre las etiquetas NET en busca de etiquetas LBL
+        for (contador=lista_etiquetas_NET.size()-1;contador>=0;contador--) {
+            etiqueta=(Tipo_Etiqueta_NET)lista_etiquetas_NET.elementAt(contador);
+            valor_int=leer_etiqueta_NET(etiqueta,lista_etiquetas);
+        }
+        
+    }
+    private void procesar_POIs(Vector lista_etiquetas,Vector lista_POIs) {
+        //ordena los punteros de POI's para mejorar el tiempo de acceso, y luego
+        //lee en la sección LBL las etiquetas de cada uno. por ahora no lee más
+        int valor_int;
+        int contador;
+        Tipo_Etiqueta_NET POI;
+        //ordena la lista
+        ordenar_lista_NET_por_puntero_etiqueta(lista_POIs,0,lista_POIs.size()-1);
+        //recorre las etiquetas NET en busca de etiquetas LBL
+        for (contador=lista_POIs.size()-1;contador>=0;contador--) {
+            POI=(Tipo_Etiqueta_NET)lista_POIs.elementAt(contador);
+            valor_int=leer_POI(POI,lista_etiquetas);
+        }
+        
+    }
+    private int leer_POI(Tipo_Etiqueta_NET POI,Vector lista_etiquetas) {
+        //por ahora sólo lee el nombre del POI
+        int retorno;
+        int puntero_etiqueta;
+        if (this.lbl_procesado==false) {
+            retorno=this.procesar_cabecera_LBL();
+            if (retorno!=0) return 1; //error procesando la cabecera
+        }
+        //coloca el puntero de archivo en la posición del POI
+        this.ajustar_puntero(lbl.puntero_inicio+LBL.LBL6_POI_propiedades_Offset+POI.puntero);
+        POI.etiquetas=new Tipo_Etiqueta[1]; //un POI sólo tiene una etiqueta
+        puntero_etiqueta=leer_trio() & 0x3fffff;
+        POI.etiquetas[0]=crear_etiqueta_vacia(lista_etiquetas,puntero_etiqueta);
+        
+        return 0;
+    }
+    private void procesar_etiquetas_mapa(Vector lista_etiquetas,Mapa_IMG mapa) {
         int contador;
         int puntero_etiqueta_anterior=0;
+        int valor_int;
         Tipo_Punto punto;
         Tipo_Etiqueta etiqueta;
-        Vector lista_etiquetas=new Vector();
+        
         //el acceso a la sección LBL del mapa debe hacerse evitando que el puntero vuelva
         //hacia atrás, así que es necesario ordenar los punteros de etiqueta de menor a mayor
+        
+        /*
         for (contador=mapa.Puntos.size()-1;contador>=0;contador--) { //primero, se recolectan los punteros
             punto=(Tipo_Punto)(mapa.Puntos.elementAt(contador));
             if (punto.es_POI==false ) {
@@ -570,34 +687,35 @@ public class IMG_Parser {
                 lista_etiquetas.addElement(punto); //añade el punto a la lista
 //            }
         }
+         */
+        
+        
+        
         //ordena la lista de menor a mayor offset, para que el puntero de archivo no tenga que retroceder
         ordenar_lista_por_puntero_etiqueta(lista_etiquetas,0,lista_etiquetas.size()-1);
         //rellena las etiquetas
         for (contador=lista_etiquetas.size()-1;contador>=0;contador--) {
-            punto=(Tipo_Punto)(lista_etiquetas.elementAt(contador));
-            //comprueba antes que la etiqueta pedida no sea igual a la anterior
-            if (puntero_etiqueta_anterior!=0 && puntero_etiqueta_anterior==punto.puntero_etiqueta)  { //en la primera iteración no se puede
-                etiqueta=((Tipo_Punto)(lista_etiquetas.elementAt(contador+1))).etiqueta;
-            } else {
-                etiqueta=leer_etiqueta(punto.puntero_etiqueta);
+            etiqueta=(Tipo_Etiqueta)(lista_etiquetas.elementAt(contador));
+            if (etiqueta.nombre_completo.compareTo("")==0) { //si la etiqueta no está definida
+                valor_int=leer_etiqueta(etiqueta);
+                //si el caché está habilitado, añade la etiqueta ya procesada
+                if (this.cache_etiquetas_activado==true) cache_etiquetas.añadir_etiqueta(etiqueta);
             }
             
-            punto.etiqueta=etiqueta;
-            puntero_etiqueta_anterior=punto.puntero_etiqueta;
         }
         
     }
     private static void ordenar_lista_por_puntero_etiqueta(Vector src, int left, int right) {
         //aplica el quicksort a una lista de puntos, de forma que quede ordenada de mayor a menor
         if (right > left) {
-            Tipo_Punto pivote = (Tipo_Punto)src.elementAt(right);
+            Tipo_Etiqueta pivote = (Tipo_Etiqueta)src.elementAt(right);
             Tipo_Punto nose;
             int i = left - 1;
             int j = right;
             while (true) {
-                while (((Tipo_Punto)src.elementAt(++i)).puntero_etiqueta>pivote.puntero_etiqueta);
+                while (((Tipo_Etiqueta)src.elementAt(++i)).puntero>pivote.puntero);
                 while (j > 0)
-                    if (((Tipo_Punto)src.elementAt(--j)).puntero_etiqueta>=pivote.puntero_etiqueta)
+                    if (((Tipo_Etiqueta)src.elementAt(--j)).puntero>=pivote.puntero)
                         break;
                 if (i >= j)
                     break;
@@ -606,6 +724,26 @@ public class IMG_Parser {
             swap(src, i, right);
             ordenar_lista_por_puntero_etiqueta(src, left, i - 1);
             ordenar_lista_por_puntero_etiqueta(src, i + 1, right);
+        }
+    }
+    private static void ordenar_lista_NET_por_puntero_etiqueta(Vector src, int left, int right) {
+        //aplica el quicksort a una lista de etiquetas NET, de forma que quede ordenada de mayor a menor
+        if (right > left) {
+            Tipo_Etiqueta_NET pivote = (Tipo_Etiqueta_NET)src.elementAt(right);
+            int i = left - 1;
+            int j = right;
+            while (true) {
+                while (((Tipo_Etiqueta_NET)src.elementAt(++i)).puntero>pivote.puntero);
+                while (j > 0)
+                    if (((Tipo_Etiqueta_NET)src.elementAt(--j)).puntero>=pivote.puntero)
+                        break;
+                if (i >= j)
+                    break;
+                swap(src, i, j);
+            }
+            swap(src, i, right);
+            ordenar_lista_NET_por_puntero_etiqueta(src, left, i - 1);
+            ordenar_lista_NET_por_puntero_etiqueta(src, i + 1, right);
         }
     }
     private static void quickSort(Vector src, int left, int right) {
@@ -628,15 +766,15 @@ public class IMG_Parser {
             quickSort(src, i + 1, right);
         }
     }
-
+    
     private static void swap(Vector src, int loc1, int loc2)   {
         //intercambia dos elementos en un vector
         Object tmp = src.elementAt(loc1);
         src.setElementAt(src.elementAt(loc2), loc1);
         src.setElementAt(tmp, loc2);
     }
-
-    private void añadir_punto(boolean indexado ,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud) {
+    
+    private void añadir_punto(boolean indexado ,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud,Vector lista_etiquetas,Vector lista_POIs) {
         //toma el punto presente a partir del puntero actual del archivo y lo
         //añade al mapa dado. se usa la misma función para puntos normales
         //y para puntos indexados
@@ -648,6 +786,8 @@ public class IMG_Parser {
         boolean es_POI=false;
         boolean tiene_subtipo=false;
         int valor_int;
+        Tipo_Etiqueta etiqueta=null;
+        Tipo_Etiqueta_NET etiqueta_POI=null;
         tipo=leer_byte();
         puntero_etiqueta=leer_trio();
         if ((puntero_etiqueta & 0x800000)!=0) tiene_subtipo=true; //bit de subtipo
@@ -662,12 +802,20 @@ public class IMG_Parser {
         if (tiene_subtipo==true) subtipo=leer_byte();
         tipo=(tipo<<8)+subtipo;
         //añade el punto al mapa
-        if (punto_interior(longitud,latitud,mapa.limites)==true) {
-            if (indexado==false) {
-                mapa.Puntos.addElement(new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud));
-            } else {
-                mapa.Puntos_Indexados.addElement(new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud));
+        if (punto_interior(longitud,latitud,mapa.limites)==false)  return; //si el punto se sale, no se añade
+        //si hay etiqueta, la añade
+        if (es_POI==false) {
+            if (puntero_etiqueta!=0) {
+                etiqueta=crear_etiqueta_vacia(lista_etiquetas,puntero_etiqueta); //referencia a la etiqueta si no es un POI
             }
+        } else {
+            etiqueta_POI=crear_POI_vacio(lista_POIs,puntero_etiqueta);
+        }
+        //añade el punto a la lista
+        if (indexado==false) {
+            mapa.Puntos.addElement(new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud,etiqueta,etiqueta_POI));
+        } else {
+            mapa.Puntos_Indexados.addElement(new Tipo_Punto(tipo,es_POI,puntero_etiqueta,longitud,latitud,etiqueta,etiqueta_POI));
         }
     }
     private boolean punto_interior(float longitud,float latitud,Tipo_Rectangulo limites) {
@@ -677,7 +825,7 @@ public class IMG_Parser {
         } else return false;
     }
 //funciones de proceso de polilíneas y polígonos
-    private void añadir_poli(boolean poligono,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud) {
+    private void añadir_poli(boolean poligono,Mapa_IMG mapa,byte n_bits,float centro_longitud,float centro_latitud,Vector lista_etiquetas,Vector lista_etiquetas_NET) {
         //añade al mapa la polilinea ó polígono que se encuentre en la posición actual del archivo
         int valor_int;
         int valor_int2;
@@ -687,7 +835,7 @@ public class IMG_Parser {
         float [] puntos_y;
         boolean [] punto_es_nodo;
         boolean mismo_signo_longitud;
-        boolean mismo_signo_latitud;  
+        boolean mismo_signo_latitud;
         boolean signo_negativo_longitud;
         boolean signo_negativo_latitud;
         boolean longitud_2_bytes=false;
@@ -708,11 +856,11 @@ public class IMG_Parser {
         byte [] cadena_poli_byte;
         Tipo_Poli poli;
         poli=new Tipo_Poli();
-
+        
         if (mapa.Poligonos.size()==12) {
             parate=true;
         }
-
+        
         
         valor_int=leer_byte_int();
         if ((valor_int & 0x80)!=0) longitud_2_bytes=true;
@@ -726,6 +874,7 @@ public class IMG_Parser {
         if ((valor_int & 0x800000)!=0) poli.datos_en_NET=true;
         if ((valor_int & 0x400000)!=0) bit_extra=true;
         poli.offset_etiqueta=valor_int & 0x3fffff;
+        
         valor_int=leer_palabra();
         if (valor_int>=32768) valor_int-=65536;
         longitud=centro_longitud+unidades_2_latlon(valor_int, n_bits);
@@ -756,7 +905,7 @@ public class IMG_Parser {
         }
         if (mismo_signo_longitud==false) {
             n_bits_longitud++;
-        } 
+        }
         if (bits_base_latitud<=9) {
             n_bits_latitud=2+bits_base_latitud;
         } else {
@@ -776,9 +925,9 @@ public class IMG_Parser {
         puntos_x[0]=longitud;
         puntos_y[0]=latitud;
         //parseo del resto de puntos
-
-
-
+        
+        
+        
         
         while (n_bits_cadena>=(puntero_bit[0]+tamaño_punto)) {
             numero_puntos++;
@@ -801,14 +950,132 @@ public class IMG_Parser {
         System.arraycopy(puntos_x,0,poli.puntos_X,0,numero_puntos);
         System.arraycopy(puntos_y,0,poli.puntos_Y,0,numero_puntos);
         System.arraycopy(punto_es_nodo,0,poli.punto_es_nodo,0,numero_puntos);
-        //añade el elemento al mapa
+        //hace una comprobación previa sobre si el elemento puede tener parte visible
+        //si el resultado es false, el elemento no es visible
+        if (verificar_clipping(poli,poligono,mapa.limites)==false) return;
+        //el elemento puede ser visible, se procesa su etiqueta
+        if (poli.datos_en_NET==true) { //nombre contenido en subarchivo NET
+            poli.etiqueta_NET=crear_etiqueta_NET_vacia(lista_etiquetas_NET,poli.offset_etiqueta);
+        } else { //nombre contenido en subarchivo LBL
+            if (poli.offset_etiqueta!=0) { //puede haber punteros nulos para indicar qur no hay etiqueta
+                poli.etiqueta=crear_etiqueta_vacia(lista_etiquetas,poli.offset_etiqueta);
+            }
+        }
+        //el elemento puede ser visible, se añade al mapa
         if (poligono==true) {
             mapa.Poligonos.addElement(poli);
         } else { //polilínea
             mapa.Polilineas.addElement(poli);
         }
-
         
+        
+    }
+    private boolean verificar_clipping(Tipo_Poli poli,boolean poligono,Tipo_Rectangulo limites) {
+        //hace una comprobación preliminar sobre si el polígono o polilínea dado
+        //puede tener parte visible. para ello comprueba en base a los 4 bordes del mapa
+        //                    \
+        //        |           |\                En principio, si uno solo de los puntos es interior,
+        //        |      \    | \               ya habrá parte visible.
+        // -------|-------\---|--\-------       Si todos los puntos son exteriores, puede haber parte
+        //        |        \  |   \             visible si al menos un segmento corta como mínimo dos bordes.
+        //        |         \ |                 Además, los polígonos cerrados pueden tener parte
+        //        |          \|                 visible sin que sus segmentos tengan más de un corte si
+        //        |           |                 envuelven completamente al recuadro.
+        // -------|-----------|\---------
+        //        |           | \
+        //        |           |
+        float x_min,x_max,y_min,y_max; //recuadro que envuelve al poli
+        int contador;
+        int cruces;
+        byte cuadrante=0,cuadrante_anterior=0,cuadrante_punto_inicial=0;
+        int xor_byte;
+        //if (nose==0) return true;
+        
+        
+/*        //primera versión, sin tablas de lookup. obliga a triplicar el proceso
+        for (contador=0;contador<poli.puntos_X.length-1;contador++) {
+            //si el punto es interior, ya es visible
+            if (poli.puntos_X[contador]>=limites.oeste && poli.puntos_X[contador]<=limites.este && poli.puntos_Y[contador]>=limites.sur && poli.puntos_Y[contador]<=limites.norte) return true;
+            //si no, se cuentan los bordes cruzados
+            cruces=0;
+            if (poli.puntos_X[contador]<=limites.este && poli.puntos_X[contador+1]>=limites.este) cruces++;
+            if (poli.puntos_X[contador+1]<=limites.este && poli.puntos_X[contador]>=limites.este) cruces++;
+            if (poli.puntos_Y[contador]<=limites.norte && poli.puntos_Y[contador+1]>=limites.norte) cruces++;
+            if (poli.puntos_Y[contador+1]<=limites.norte && poli.puntos_Y[contador]>=limites.norte) cruces++;
+ 
+            if (poli.puntos_X[contador]<=limites.oeste && poli.puntos_X[contador+1]>=limites.oeste) cruces++;
+            if (poli.puntos_X[contador+1]<=limites.oeste && poli.puntos_X[contador]>=limites.oeste) cruces++;
+            if (poli.puntos_Y[contador]<=limites.sur && poli.puntos_Y[contador+1]>=limites.sur) cruces++;
+            if (poli.puntos_Y[contador+1]<=limites.sur && poli.puntos_Y[contador]>=limites.sur) cruces++;
+            if (cruces>1) return true;
+        }
+ */
+        //segunda versión, se define el cuadrante que ocupa cada punto y se cuenta el número de ejes que
+        //hay que cruzar para llegar al siguiente punto
+        //        |          |
+        //  1001  |   0001   | 0011
+        // -------|----------|----------
+        //        |          |
+        //  1000  |   0000   | 0010
+        //        |          |
+        // -------|----------|----------
+        //  1100  |   0100   | 0110
+        //        |          |
+        //para contar los ejes cruzados hay que contar los cambios de bit. si se
+        //pasa del 0000 al 0010, se cruza un eje. del 1100 al 0011 se cruzan 4
+        if (poli.puntos_X.length==152) {
+            nose=0;
+        }
+        
+        x_min=poli.puntos_X[0];
+        x_max=poli.puntos_X[0];
+        y_min=poli.puntos_Y[0];
+        y_max=poli.puntos_Y[0];
+        
+        for (contador=0;contador<poli.puntos_X.length;contador++) {
+            cuadrante=0;
+            //comprobación eje a eje
+            if (poli.puntos_Y[contador]>=limites.norte) cuadrante++;
+            if (poli.puntos_X[contador]>=limites.este) cuadrante+=2;
+            if (poli.puntos_Y[contador]<=limites.sur) cuadrante+=4;
+            if (poli.puntos_X[contador]<=limites.oeste) cuadrante+=8;
+            if (cuadrante==0) return true; //punto interior. visible
+            if (contador>0) { //debe estar definito el cuadrante del punto anterior
+                xor_byte=cuadrante^cuadrante_anterior;
+                if (contador_unos[xor_byte]>=2) return true; //hay dos ejes cortados. puede ser visible
+                if (poli.puntos_X[contador]<x_min) x_min=poli.puntos_X[contador];
+                if (poli.puntos_X[contador]>x_max) x_max=poli.puntos_X[contador];
+                if (poli.puntos_Y[contador]<y_min) y_min=poli.puntos_Y[contador];
+                if (poli.puntos_Y[contador]>y_max) y_max=poli.puntos_Y[contador];
+            } else {
+                cuadrante_punto_inicial=cuadrante; //guarda el punto inicial para compararlo luego con el final
+            }
+            cuadrante_anterior=cuadrante;
+        }
+        if (poligono==true) { //queda por comprobar la línea que une el último punto con el primero
+            xor_byte=cuadrante_punto_inicial^cuadrante;
+            if (contador_unos[xor_byte]>=2) return true; //hay dos ejes cortados. puede ser visible
+        }
+        //queda por comprobar si el polígono envuelve completamente al rectángulo
+        if (x_max>limites.este && x_min<limites.oeste && y_min < limites.sur && y_max>limites.norte) {
+            /*
+            //se cambian los puntos del polígono para que ocupe las cuatro esquinas del área
+            float [] nuevos_x=new float [4];
+            float [] nuevos_y=new float [4];
+            nuevos_x[0]=limites.oeste;
+            nuevos_y[0]=limites.sur;
+            nuevos_x[1]=limites.oeste;
+            nuevos_y[1]=limites.norte;
+            nuevos_x[2]=limites.este;
+            nuevos_y[2]=limites.norte;
+            nuevos_x[3]=limites.este;
+            nuevos_y[3]=limites.sur;
+            poli.puntos_X=nuevos_x;
+            poli.puntos_Y=nuevos_y;
+             */
+            return true;
+        }
+        return false;
     }
     private boolean leer_bit_cadena(byte [] cadena,int[] n_bit) {
         //devuelve el bit especificado de la cadena. el número se manda en un objeto para poder editarlo
@@ -825,8 +1092,7 @@ public class IMG_Parser {
         valor_byte=cadena[numero_byte];
         if (( valor_byte & potencias_2[bit_local])!=0) {
             retorno= true;
-        }
-        else {
+        } else {
             retorno= false;
         }
         n_bit[0]++;
@@ -875,8 +1141,8 @@ public class IMG_Parser {
         }
         return resultado;
     }
-
-//funciones de obtención de niveles    
+    
+//funciones de obtención de niveles
     private byte corregir_nivel(byte nivel){
         //dado un nivel, devuelve el valor más cercano que tenga geometría
         byte nuevo_nivel;
@@ -885,7 +1151,20 @@ public class IMG_Parser {
         nivel_maximo=TRE.TRE1[TRE.indice_maximo_nivel_con_geometria].zoom;
         if (nivel>nivel_maximo) nuevo_nivel=nivel_maximo; //el nivel pedido no existe o no tiene geometría
         else nuevo_nivel=nivel; //nivel válido
+        //también puede pasar que no exista geometría en ese nivel. entonces, se busca el inmediatamente anterior
+        while (existe_nivel(nuevo_nivel)==false && nuevo_nivel>0) //si no existe este nivel...
+        {
+            nuevo_nivel--; //...prueba con el anterior
+        }
         return nuevo_nivel;
+    }
+    private boolean existe_nivel(byte nivel) {
+        //devuelve true si el nivel indicado existe en el mapa
+        int contador;
+        for (contador=TRE.TRE1.length-1;contador>=0;contador--) { //recorre los niveles
+            if (TRE.TRE1[contador].zoom==nivel) return true;
+        }
+        return false; //no se ha encontrado
     }
     private int obtener_puntero_nivel(byte nivel) {
         //devuelve el puntero correspondiente al nivel pedido. normalmente,
@@ -897,26 +1176,25 @@ public class IMG_Parser {
         }
         return -1; //error extraño
     }
-//funciones para la lectura de etiquetas    
-    private Tipo_Etiqueta leer_etiqueta (int offset) {
+//funciones para la lectura de etiquetas
+    private int leer_etiqueta(Tipo_Etiqueta etiqueta) {
         int offset_absoluto; //posición dentro del archivo IMG
         int retorno;
         int puntero_etiqueta;
-        Tipo_Etiqueta etiqueta=null;
         if (lbl_procesado==false) {
             retorno=procesar_cabecera_LBL();
-            if (retorno!=0) return null; //error en la apertura de LBL
+            if (retorno!=0) return 1; //error en la apertura de LBL
         }
-        puntero_etiqueta=lbl.puntero_inicio+LBL.LBL1_etiquetas_offset+offset* potencias_2[LBL.LBL1_etiquetas_multiplicador_offset];
+        puntero_etiqueta=lbl.puntero_inicio+LBL.LBL1_etiquetas_offset+etiqueta.puntero* potencias_2[LBL.LBL1_etiquetas_multiplicador_offset];
         this.ajustar_puntero(puntero_etiqueta);
         if (LBL.formato_etiquetas==6) { //etiqueta de 6 bits
-            etiqueta=leer_etiqueta_6();
+            retorno=leer_etiqueta_6(etiqueta);
         } else if (LBL.formato_etiquetas==9) { //etiqueta de 8 bits
-            etiqueta=leer_etiqueta_8();
+            retorno=leer_etiqueta_8(etiqueta);
         }
-        return etiqueta;
+        return 0; //etiqueta leída sin problemas
     }
-    private Tipo_Etiqueta leer_etiqueta_6(){
+    private int leer_etiqueta_6(Tipo_Etiqueta etiqueta){
         //lee una etiqueta con caracteres de 6 bits
         String caracteres_mayusculas= " ABCDEFGHIJKLMNOPQRSTUVWXYZ~~~~~0123456789~~~~~~";
         String caracteres_simbolos= "@!\"#$%&'()*+,-./~~~~~~~~~~:;<=>?~~~~~~~~~~~[\\]^_";
@@ -927,13 +1205,12 @@ public class IMG_Parser {
         boolean minuscula=false;
         boolean simbolo=false;
         boolean abreviatura=false;  //si pasa a True, se escribe todo lo que queda en la abreviatura
-        Tipo_Etiqueta etiqueta=new Tipo_Etiqueta("","","");
         while (true) {
             caracter=leer_6_bits_IMG();
             if (caracter>0x2f) { //fin de etiqueta
                 puntero_bit=7;
                 break;
-                }
+            }
             if (caracter==0x1c) { //el siguiente carácter es un símbolo
                 caracter=leer_bits_IMG(6);
                 simbolo=true;
@@ -950,7 +1227,7 @@ public class IMG_Parser {
                 simbolo=false;
             } else {
                 if (caracter>=0x2a && caracter<=0x2f) { //símbolo de autopista
-                    cadena="[0x"+Integer.toHexString(caracter);
+                    cadena="[0x"+Integer.toHexString(caracter).toLowerCase()+"]";
                 } else {
                     cadena=caracteres_mayusculas.substring(caracter,caracter+1);
                 }
@@ -962,7 +1239,7 @@ public class IMG_Parser {
                 etiqueta.nombre_corto="";
             } else if (caracter==0x1f) { //cortar en vista de GPS todo lo que venga después
                 etiqueta.nombre_completo+=" ";
-                etiqueta.nombre_corto+=String.valueOf(254); //marca el carácter a partir del cual cortar luego
+                etiqueta.nombre_corto+=new Character((char)254).toString(); //marca el carácter a partir del cual cortar luego
             } else {
                 if (abreviatura==false) {
                     etiqueta.nombre_completo+=cadena;
@@ -973,13 +1250,15 @@ public class IMG_Parser {
             }
         }
         contador=etiqueta.nombre_corto.indexOf(254);
-        if (contador!=-1) { //existe el carácter de corte
-            etiqueta.nombre_corto=etiqueta.nombre_corto.substring(contador+1);
-        }
         etiqueta.nombre_completo=etiqueta.nombre_completo.toLowerCase();
-        return etiqueta;
+        etiqueta.nombre_corto=etiqueta.nombre_corto.toLowerCase();
+        etiqueta.abreviatura=etiqueta.abreviatura.toLowerCase();
+        if (contador!=-1) { //existe el carácter de corte
+            etiqueta.nombre_corto=etiqueta.nombre_corto.substring(0,contador);
+        }
+        return 0; //etiqueta leída sin problemas
     }
-    private Tipo_Etiqueta leer_etiqueta_8(){
+    private int leer_etiqueta_8(Tipo_Etiqueta etiqueta){
         //lee una etiqueta con caracteres de 6 bits
         String caracteres_mayusculas= " ABCDEFGHIJKLMNOPQRSTUVWXYZ~~~~~0123456789~~~~~~";
         String caracteres_simbolos= "@!\"#$%&'()*+,-./~~~~~~~~~~:;<=>?~~~~~~~~~~~[\\]^_";
@@ -990,7 +1269,6 @@ public class IMG_Parser {
         boolean minuscula=false;
         boolean simbolo=false;
         boolean abreviatura=false;  //si pasa a True, se escribe todo lo que queda en la abreviatura
-        Tipo_Etiqueta etiqueta=new Tipo_Etiqueta("","","");
         while (true) {
             caracter=leer_byte_int();
             if (caracter==0) { //fin de etiqueta
@@ -1004,8 +1282,11 @@ public class IMG_Parser {
                 etiqueta.nombre_corto="";
             } else if (caracter==0x1f) { //cortar en vista de GPS todo lo que venga después
                 etiqueta.nombre_completo+=" ";
-                etiqueta.nombre_corto+=String.valueOf(254); //marca el carácter a partir del cual cortar luego
+                etiqueta.nombre_corto+=new Character((char)254).toString(); //marca el carácter a partir del cual cortar luego
             } else {
+                if (caracter<=6) {
+                    cadena="[0x"+new Integer(0x29+caracter).toHexString(0x29+caracter)+"]";
+                }
                 if (abreviatura==false) {
                     etiqueta.nombre_completo+=cadena;
                     etiqueta.nombre_corto+=cadena;
@@ -1014,352 +1295,473 @@ public class IMG_Parser {
                 }
             }
         }
+        etiqueta.nombre_completo=etiqueta.nombre_completo.toLowerCase();
+        etiqueta.nombre_corto=etiqueta.nombre_corto.toLowerCase();
+        etiqueta.abreviatura=etiqueta.abreviatura.toLowerCase();
         contador=etiqueta.nombre_corto.indexOf(254);
         if (contador!=-1) { //existe el carácter de corte
-            etiqueta.nombre_corto=etiqueta.nombre_corto.substring(contador+1);
+            etiqueta.nombre_corto=etiqueta.nombre_corto.substring(0,contador);
         }
-        etiqueta.nombre_completo=etiqueta.nombre_completo.toLowerCase();
-        return etiqueta;
-    }    
+        return 0; //etiqueta leída sin problemas
+    }
     
-//funciones de lectura de los bytes del mapa    
+    private int leer_etiqueta_NET(Tipo_Etiqueta_NET etiqueta,Vector lista_etiquetas) {
+        int offset_absoluto; //posición dentro del archivo IMG
+        int retorno;
+        int puntero_etiqueta;
+        int valor_int;
+        int contador;
+        boolean mas_etiquetas=true;
+        Vector punteros_LBL=new Vector();
+        if (cabecera_NET_procesada==false) {
+            retorno=procesar_cabecera_NET();
+            if (retorno!=0) return 1; //error en la apertura de NET
+        }
+        puntero_etiqueta=net.puntero_inicio+NET.NET1_definiciones_carreteras_offset+etiqueta.puntero* potencias_2[NET.NET1_definiciones_carreteras_multiplicador_offset];
+        this.ajustar_puntero(puntero_etiqueta);
+        while (mas_etiquetas==true) {
+            valor_int=leer_trio();
+            if ((valor_int & 0x800000)!=0) {
+                mas_etiquetas=false;
+                valor_int&=0x3fffff;
+            }
+            if (valor_int!=0) { //si hay una etiqueta no nula, la añade
+                punteros_LBL.addElement(new Integer(valor_int));
+            }
+        }
+        valor_int=punteros_LBL.size();
+        if (punteros_LBL.size()==0) return 0;
+        etiqueta.etiquetas=new Tipo_Etiqueta[punteros_LBL.size()];
+        for (contador=0;contador<punteros_LBL.size();contador++) {
+            valor_int=((Integer)punteros_LBL.elementAt(contador)).intValue(); //puntero en LBL
+            etiqueta.etiquetas[contador]=crear_etiqueta_vacia(lista_etiquetas,valor_int);
+        }
+        
+        return 0; //etiqueta leída sin problemas
+    }
+//funciones de lectura de los bytes del mapa
     private byte leer_byte() {
-      byte[] b=new byte[1];
-      try {
-          stream_IMG.read(b);
-          b[0] =(byte)((int)b[0] ^ xor_byte);
-          puntero++;
-          return (b[0]);
-      } catch (IOException ex) {
-          ex.printStackTrace();
-          return 0;
-      }
-  }
+        byte[] b=new byte[1];
+        try {
+            stream_IMG.read(b);
+            b[0] =(byte)((int)b[0] ^ xor_byte);
+            puntero++;
+            return (b[0]);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return 0;
+        }
+    }
     private int leer_byte_int() { //devuelve un entero, para que el signo del byte no incordie
-      byte[] b=new byte[1];
-      try {
-          stream_IMG.read(b);
-          b[0] =(byte)((int)b[0] ^ xor_byte);
-          puntero++;
-          return (int)b[0]& 0x000000ff; //la versión entera de un byte negativo es 0xffffff**
-      } catch (IOException ex) {
-          ex.printStackTrace();
-          return 0;
-      }
-  }
-  private int leer_palabra() {
-      int byte1,byte2;
-      byte1=leer_byte_int();
-      byte2=leer_byte_int()<<8;
-      return byte1 | byte2;
-  }
-  private int leer_trio() {
-      int byte1,byte2,byte3;
-      byte1=leer_byte_int();
-      byte2=leer_byte_int()<<8;
-      byte3=leer_byte_int()<<16;
-      return byte1 | byte2 | byte3;
-  }
+        byte[] b=new byte[1];
+        try {
+            stream_IMG.read(b);
+            b[0] =(byte)((int)b[0] ^ xor_byte);
+            puntero++;
+            return (int)b[0]& 0x000000ff; //la versión entera de un byte negativo es 0xffffff**
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return 0;
+        }
+    }
+    private int leer_palabra() {
+        int byte1,byte2;
+        byte1=leer_byte_int();
+        byte2=leer_byte_int()<<8;
+        return byte1 | byte2;
+    }
+    private int leer_trio() {
+        int byte1,byte2,byte3;
+        byte1=leer_byte_int();
+        byte2=leer_byte_int()<<8;
+        byte3=leer_byte_int()<<16;
+        return byte1 | byte2 | byte3;
+    }
     private int leer_quad() {
-      int byte1,byte2,byte3,byte4;
-      byte1=leer_byte_int();
-      byte2=leer_byte_int()<<8;
-      byte3=leer_byte_int()<<16;
-      byte4=leer_byte_int()<<24;
-      return byte1 | byte2|byte3|byte4;
-  }
+        int byte1,byte2,byte3,byte4;
+        byte1=leer_byte_int();
+        byte2=leer_byte_int()<<8;
+        byte3=leer_byte_int()<<16;
+        byte4=leer_byte_int()<<24;
+        return byte1 | byte2|byte3|byte4;
+    }
     
-  private String leer_cadena(int len_cadena){
-      byte[] b=new byte[len_cadena];
-      int contador;
-      try {
-          stream_IMG.read(b);
-      } catch (IOException ex) {
-          ex.printStackTrace();
-      }
-      for (contador=0;contador<len_cadena;contador++){
-          b[contador]=(byte)((int)b[contador] ^ xor_byte);
-      }
-      puntero+=len_cadena;
-      return new String(b);
-  }
-  private byte[] leer_cadena_bytes(int len_cadena){
-      byte[] b=new byte[len_cadena];
-      int contador;
-      try {
-          stream_IMG.read(b);
-      } catch (IOException ex) {
-          ex.printStackTrace();
-      }
-      for (contador=0;contador<len_cadena;contador++){
-          b[contador]=(byte)((int)b[contador] ^ xor_byte);
-      }
-      puntero+=len_cadena;
-      return b;
-  }
+    private String leer_cadena(int len_cadena){
+        byte[] b=new byte[len_cadena];
+        int contador;
+        try {
+            stream_IMG.read(b);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        for (contador=0;contador<len_cadena;contador++){
+            b[contador]=(byte)((int)b[contador] ^ xor_byte);
+        }
+        puntero+=len_cadena;
+        return new String(b);
+    }
+    private byte[] leer_cadena_bytes(int len_cadena){
+        byte[] b=new byte[len_cadena];
+        int contador;
+        try {
+            stream_IMG.read(b);
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+        for (contador=0;contador<len_cadena;contador++){
+            b[contador]=(byte)((int)b[contador] ^ xor_byte);
+        }
+        puntero+=len_cadena;
+        return b;
+    }
 //funciones de lectura de bits del archivo IMG
-  private boolean leer_bit_IMG(){
-      //lee un bit del byte actual en el archivo IMG
-      boolean retorno;
-      if (puntero_bit==7) { //el byte actual no ha sido leído. se lee y se guarda en el buffer
-          buffer_lectura_bits=leer_byte_int();
-      }
-      if (( buffer_lectura_bits & potencias_2[puntero_bit])!=0) {
-          retorno= true;
-      } else {
-          retorno= false;
-      }
-      if (puntero_bit==0) { //se ha leído el último bit, el puntero ha avanzado al siguiente byte...
-          puntero_bit=7; //...así que se pasa al siguiente MSB
-      } else {
-          puntero_bit--;
-      }
-      return retorno;
-  }
-  private int leer_bits_IMG(int n_bits) {
-      //lee n_bits del IMG abierto
-      int contador;
-      int resultado=0;
-      for (contador=0;contador<n_bits;contador++) {
-          if (leer_bit_IMG()==true) {
-              resultado=resultado*2+1;
-          } else {
-              resultado*=2;
-          }
-      }
-      return resultado;
-  }
-  private int leer_6_bits_IMG() {
-      //lee 6 bits del IMG abierto, a no ser que los dos primeros sean dos 1's. como eso significa
-      //fin de etiqueta, se evita así cambiar de byte, lo que oligaría a hacer retroceder el puntero
-      //cuando haya que leer le etiqueta contigua
-      int contador;
-      int resultado=0;
-      for (contador=0;contador<6;contador++) {
-          if (leer_bit_IMG()==true) {
-              resultado=resultado*2+1;
-          } else {
-              resultado*=2;
-          }          
-          if (contador==1 && resultado==3) { //llevamos dos 1's. fin de etiqueta
-              return 0x30;
-          }
-      }
-      return resultado;
-  }
-  
+    private boolean leer_bit_IMG(){
+        //lee un bit del byte actual en el archivo IMG
+        boolean retorno;
+        if (puntero_bit==7) { //el byte actual no ha sido leído. se lee y se guarda en el buffer
+            buffer_lectura_bits=leer_byte_int();
+        }
+        if (( buffer_lectura_bits & potencias_2[puntero_bit])!=0) {
+            retorno= true;
+        } else {
+            retorno= false;
+        }
+        if (puntero_bit==0) { //se ha leído el último bit, el puntero ha avanzado al siguiente byte...
+            puntero_bit=7; //...así que se pasa al siguiente MSB
+        } else {
+            puntero_bit--;
+        }
+        return retorno;
+    }
+    private int leer_bits_IMG(int n_bits) {
+        //lee n_bits del IMG abierto
+        int contador;
+        int resultado=0;
+        for (contador=0;contador<n_bits;contador++) {
+            if (leer_bit_IMG()==true) {
+                resultado=resultado*2+1;
+            } else {
+                resultado*=2;
+            }
+        }
+        return resultado;
+    }
+    private int leer_6_bits_IMG() {
+        //lee 6 bits del IMG abierto, a no ser que los dos primeros sean dos 1's. como eso significa
+        //fin de etiqueta, se evita así cambiar de byte, lo que oligaría a hacer retroceder el puntero
+        //cuando haya que leer le etiqueta contigua
+        int contador;
+        int resultado=0;
+        for (contador=0;contador<6;contador++) {
+            if (leer_bit_IMG()==true) {
+                resultado=resultado*2+1;
+            } else {
+                resultado*=2;
+            }
+            if (contador==1 && resultado==3) { //llevamos dos 1's. fin de etiqueta
+                return 0x30;
+            }
+        }
+        return resultado;
+    }
+    
 //funciones de manejo del puntero de archivo
-  private void ajustar_punto_reinicio() {
-      //ajusta la posición actual, para poder volver al resetear el punto de inicio
-      punto_reinicio=puntero;
-      try {
-          stream_IMG.mark((int)archivo_IMG.fileSize());
-      } catch (IOException ex) {
-          ex.printStackTrace();
-      }
-  }
-  private void reset_punto_inicio() {
-      if (reset_soportado==true) {
-          try {
-              //vuelve al punto de reinicio fijado
-              stream_IMG.reset();
-          } catch (IOException ex) {
-              ex.printStackTrace();
-          }
-          puntero=punto_reinicio;
-      } else {
+    private void ajustar_punto_reinicio() {
+        //ajusta la posición actual, para poder volver al resetear el punto de inicio
+        punto_reinicio=puntero;
+        try {
+            if (mapa_interno==false) {
+                stream_IMG.mark((int)archivo_IMG.fileSize());
+            } else {
+                stream_IMG.mark(25000000);
+            }
+            
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+    }
+    private void reset_punto_inicio() {
+        if (reset_soportado==true) {
+            try {
+                //vuelve al punto de reinicio fijado
+                stream_IMG.reset();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+            puntero=punto_reinicio;
+        } else {
             try {
                 stream_IMG.close();
-                archivo_IMG.close();
-                archivo_IMG = (FileConnection) Connector.open(ruta_archivo,Connector.READ);
-                stream_IMG=archivo_IMG.openInputStream();
+                if (mapa_interno==false) {
+                    archivo_IMG.close();
+                    archivo_IMG = (FileConnection) Connector.open(ruta_archivo,Connector.READ);
+                    stream_IMG=archivo_IMG.openInputStream();
+                } else {
+                    stream_IMG=clase.getResourceAsStream(ruta_archivo);
+                }
                 puntero=0;
                 
             } catch (IOException ex) {
                 ex.printStackTrace();
             }
-      }
-  }
-  private void avanzar_puntero(int bytes_salto) {
-      try {
-          //avanza el número de bytes indicado
-          stream_IMG.skip(bytes_salto);
-          puntero+=bytes_salto;
-      } catch (IOException ex) {
-          ex.printStackTrace();
-      }
-  }
-  private void ajustar_puntero(int nuevo_puntero) {
-      //ajusta la posición de lectura del mapa. si la posición está por delante,
-      //se salta la diferencia. si está detrás, hay que resetear y saltar
-      if (nuevo_puntero>puntero) {//hay que avanzar
-          avanzar_puntero(nuevo_puntero-puntero);
-      } else if (nuevo_puntero<puntero) { //hay que resetear y volver a avanzar
-          if (nuevo_puntero>punto_reinicio) {
-              reset_punto_inicio();
-              avanzar_puntero(nuevo_puntero-puntero);
-          } else if (nuevo_puntero<punto_reinicio) {
-              try {
-                  throw new IOException("Retroceso todavía no implementado"); //hay que cerrar y volver a abrir
-              } catch (IOException ex) {
-                  ex.printStackTrace();
-              } //hay que cerrar y volver a abrir
-          } else { //nuevo_puntero=punto_reinicio
-              reset_punto_inicio();
-          }
-      } else { //nuevo_puntero=puntero, no hay que hacer nada
-          return;
-      }
-  }
-  private int leer_bloque_final() {
-      //devuelve el valor del último bloque indicado en la FAT, justo antes de FF FF
-      int anterior1=0;
-      int anterior2=0;
-      int actual1,actual2;
-      int contador=0; //dentro de una FAT puede haber 480 bytes de bloques, sin terminar en FF FF
-      while (true) {
-          actual1 = leer_byte_int();
-          actual2 = leer_byte_int();
-          contador++;
-          if ((actual1 == 255 & actual2 == 255) | contador == 239) {
-              break;
-          }
-          anterior1=actual1;
-          anterior2=actual2;
-      }
-      if ((actual1 != 255 | actual2 != 255) & contador == 239) { //se llega al límite y además no hay marca de fin de bloque
-          return (actual1|actual2<<8);
-      } else //no se llega al límite, o si se llega, hay una marca de fin
-          return (anterior1|anterior2<<8);
-  }
-  private float trio_2_latlon(int trio) {
-    //convierte una coordenada en tres bytes a latitud/longitud
-      double aux;
-      final int dos_exp_24=16777216; //2^24
-      aux=(double)360/(double)dos_exp_24*(double)trio;
-      if (aux>180) {
-          aux-=360;
-      }
-      return (float)aux;
-  }
-  private float unidades_2_latlon(int unidades_mapa, byte n_bits){
-      //convierte las unidades de mapa en grados de longitud/latitud
-      double aux;
-      aux=(double)(unidades_mapa*360)/(double)(potencias_2[n_bits]);
-      if (aux>180) aux-=360;
-      return ((float)aux);
-  }
-  private boolean interseccion_subdivision_rectangulo(int n_subdiv,Tipo_Rectangulo rectangulo){
-      //devuelve true si hay interferencia entre el rectángulo dado y
-      //los límites de la subdivisión dada.
-      boolean contenido_X=false;
-      boolean contenido_Y=false;
-      Tipo_Subdivisiones_TRE2 subdiv;
-      subdiv=(Tipo_Subdivisiones_TRE2)TRE.TRE2.elementAt(n_subdiv);
-      if ((rectangulo.oeste>=subdiv.limite_oeste && rectangulo.oeste<=subdiv.limite_este) || 
-              (rectangulo.este>=subdiv.limite_oeste && rectangulo.este<=subdiv.limite_este) ||
-              (subdiv.limite_oeste>=rectangulo.oeste && subdiv.limite_oeste<=rectangulo.este) ||
-              (subdiv.limite_este>=rectangulo.oeste && subdiv.limite_este<=rectangulo.este)) contenido_X=true;
-      if (contenido_X==false) return false;
-      if ((rectangulo.sur>=subdiv.limite_sur && rectangulo.sur<=subdiv.limite_norte) || 
-              (rectangulo.norte>=subdiv.limite_sur && rectangulo.norte<=subdiv.limite_norte) ||
-              (subdiv.limite_sur>=rectangulo.sur && subdiv.limite_sur<=rectangulo.norte) ||
-              (subdiv.limite_norte>=rectangulo.sur && subdiv.limite_norte<=rectangulo.norte)) contenido_Y=true;      
-      if (contenido_Y==true) return true;
-      return false;
-  }
-  //estructuras de subarchivos y subestructuras
-  private class Tipo_Subarchivo { //clase interna para manejo de los subarchivos
-      int bloque_inicial;
-      int bloque_final;
-      int puntero_inicio;
-      int tamaño;
-      int tamaño_temporal; //puede ser útil en depuración
-      String nombre;
-  }
-  private class Tipo_TRE { //estructura básica de un subarchivo TRE, que contiene TRE1 y TRE2
-      float limite_norte;
-      float limite_este;
-      float limite_sur;
-      float limite_oeste;
-      int offset_niveles_TRE1;
-      int tamaño_niveles_TRE1;
-      int offset_subdivisiones_TRE2;
-      int tamaño_subdivisiones_TRE2;
-      int numero_subdivisiones;
-      Tipo_Niveles_TRE1 [] TRE1;
-      int indice_maximo_nivel_con_geometria; //puntero al nivel de menos detalle que tiene geometría
-      Vector TRE2;
-  }
-  private class Tipo_RGN { //punteros a las áreas de datos de cada subdivisión
-      int [] puntero_puntos; //posición absoluta dentro del archivo IMG
-      int [] final_puntos; //último byte del área
-      int [] puntero_puntos_indexados;
-      int [] final_puntos_indexados;
-      int [] puntero_polilineas;
-      int [] final_polilineas;
-      int [] puntero_poligonos;
-      int [] final_poligonos;
-      public Tipo_RGN(int numero_subdivisiones) { //el constructor reseva sitio para los arrays
-          puntero_puntos=new int[numero_subdivisiones];
-          final_puntos=new int[numero_subdivisiones];
-          puntero_puntos_indexados=new int[numero_subdivisiones];
-          final_puntos_indexados=new int[numero_subdivisiones];
-          puntero_polilineas=new int[numero_subdivisiones];
-          final_polilineas=new int[numero_subdivisiones];
-          puntero_poligonos=new int[numero_subdivisiones];
-          final_poligonos=new int[numero_subdivisiones];
-      }
-  }
-  private class Tipo_Niveles_TRE1{ //definición de los niveles de detalle y su precisión
-      byte zoom;
-      byte bits_coordenada;
-      int subdivisiones;
-      int puntero_primera_subdivision; //primera subdivisión del nivel
-  }
-  private class Tipo_Subdivisiones_TRE2 { //secciones que forman el mapa
-      int puntero_RGN;
-      byte tipo_objetos;
-      boolean objetos_puntos;
-      boolean objetos_puntos_indexados;
-      boolean objetos_polilineas;
-      boolean objetos_poligonos;
-      float limite_norte;
-      float limite_este;
-      float limite_sur;
-      float limite_oeste;
-      float centro_longitud;
-      float centro_latitud;
-      boolean flag_ultimo;
-      int subdivision_siguiente_nivel;
-  }
-  private class Tipo_LBL { //definición de la cabecera de un subarchivo LBL
-    int LBL1_etiquetas_offset;
-    int LBL1_etiquetas_tamaño;
-    int LBL1_etiquetas_multiplicador_offset;
-    byte formato_etiquetas;
-    int LBL2_paises_offset;
-    int LBL2_paises_tamaño;
-    int LBL2_paises_tamaño_registro;
-    int LBL3_regiones_offset;
-    int LBL3_regiones_tamaño;
-    int LBL3_regiones_tamaño_registro;
-    int LBL4_ciudades_offset;
-    int LBL4_ciudades_tamaño;
-    int LBL4_ciudades_tamaño_registro;
-    int LBL5_POI_indices_offset;
-    int LBL5_POI_indices_tamaño;
-    int LBL5_POI_indices_tamaño_registro;
-    int LBL6_POI_propiedades_Offset;
-    int LBL6_POI_propiedades_tamaño;
-    boolean LBL6_POI_propiedades_ZIP_Bit_Is_Phone_If_No_Phone_Bit;
-    byte LBL6_POI_propiedades_mascara_global;
-    int LBL7_POI_tipos_Offset;
-    int LBL7_POI_tipos_tamaño;
-    int LBL7_POI_tipos_tamaño_registro;
-    int LBL8_ZIP_Offset;
-    int LBL8_ZIP_tamaño;
-    int LBL8_ZIP_tamaño_registro;
-  }
-
+        }
+    }
+    private void avanzar_puntero(int bytes_salto) {
+        try {
+            //avanza el número de bytes indicado
+            stream_IMG.skip(bytes_salto);
+            puntero+=bytes_salto;
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+    }
+    private void ajustar_puntero(int nuevo_puntero) {
+        //ajusta la posición de lectura del mapa. si la posición está por delante,
+        //se salta la diferencia. si está detrás, hay que resetear y saltar
+        if (nuevo_puntero>puntero) {//hay que avanzar
+            avanzar_puntero(nuevo_puntero-puntero);
+        } else if (nuevo_puntero<puntero) { //hay que resetear y volver a avanzar
+            if (nuevo_puntero>punto_reinicio) {
+                reset_punto_inicio();
+                avanzar_puntero(nuevo_puntero-puntero);
+            } else if (nuevo_puntero<punto_reinicio) {
+                try {
+                    throw new IOException("Retroceso todavía no implementado"); //hay que cerrar y volver a abrir
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                } //hay que cerrar y volver a abrir
+            } else { //nuevo_puntero=punto_reinicio
+                reset_punto_inicio();
+            }
+        } else { //nuevo_puntero=puntero, no hay que hacer nada
+            return;
+        }
+    }
+    private int leer_bloque_final() {
+        //devuelve el valor del último bloque indicado en la FAT, justo antes de FF FF
+        int anterior1=0;
+        int anterior2=0;
+        int actual1,actual2;
+        int contador=0; //dentro de una FAT puede haber 480 bytes de bloques, sin terminar en FF FF
+        while (true) {
+            actual1 = leer_byte_int();
+            actual2 = leer_byte_int();
+            contador++;
+            if ((actual1 == 255 & actual2 == 255) | contador == 239) {
+                break;
+            }
+            anterior1=actual1;
+            anterior2=actual2;
+        }
+        if ((actual1 != 255 | actual2 != 255) & contador == 239) { //se llega al límite y además no hay marca de fin de bloque
+            return (actual1|actual2<<8);
+        } else //no se llega al límite, o si se llega, hay una marca de fin
+            return (anterior1|anterior2<<8);
+    }
+    private float trio_2_latlon(int trio) {
+        //convierte una coordenada en tres bytes a latitud/longitud
+        double aux;
+        final int dos_exp_24=16777216; //2^24
+        aux=(double)360/(double)dos_exp_24*(double)trio;
+        if (aux>180) {
+            aux-=360;
+        }
+        return (float)aux;
+    }
+    private float unidades_2_latlon(int unidades_mapa, byte n_bits){
+        //convierte las unidades de mapa en grados de longitud/latitud
+        double aux;
+        aux=(double)(unidades_mapa*360)/(double)(potencias_2[n_bits]);
+        if (aux>180) aux-=360;
+        return ((float)aux);
+    }
+    private boolean interseccion_subdivision_rectangulo(int n_subdiv,Tipo_Rectangulo rectangulo){
+        //devuelve true si hay interferencia entre el rectángulo dado y
+        //los límites de la subdivisión dada.
+        boolean contenido_X=false;
+        boolean contenido_Y=false;
+        Tipo_Subdivisiones_TRE2 subdiv;
+        subdiv=(Tipo_Subdivisiones_TRE2)TRE.TRE2.elementAt(n_subdiv);
+        if ((rectangulo.oeste>=subdiv.limite_oeste && rectangulo.oeste<=subdiv.limite_este) ||
+                (rectangulo.este>=subdiv.limite_oeste && rectangulo.este<=subdiv.limite_este) ||
+                (subdiv.limite_oeste>=rectangulo.oeste && subdiv.limite_oeste<=rectangulo.este) ||
+                (subdiv.limite_este>=rectangulo.oeste && subdiv.limite_este<=rectangulo.este)) contenido_X=true;
+        if (contenido_X==false) return false;
+        if ((rectangulo.sur>=subdiv.limite_sur && rectangulo.sur<=subdiv.limite_norte) ||
+                (rectangulo.norte>=subdiv.limite_sur && rectangulo.norte<=subdiv.limite_norte) ||
+                (subdiv.limite_sur>=rectangulo.sur && subdiv.limite_sur<=rectangulo.norte) ||
+                (subdiv.limite_norte>=rectangulo.sur && subdiv.limite_norte<=rectangulo.norte)) contenido_Y=true;
+        if (contenido_Y==true) return true;
+        return false;
+    }
+    private Tipo_Etiqueta crear_etiqueta_vacia(Vector lista_etiquetas,int puntero) {
+        //busca en la lista de etiquetas una que tenga el puntero dado. si no
+        //aparece, quiere decir que es un etiqueta nueva, y la crea.
+        int contador;
+        Tipo_Etiqueta etiqueta;
+        if (this.cache_etiquetas_activado==true) { //si hay caché disponible,
+            etiqueta=cache_etiquetas.leer_etiqueta(puntero);
+            if (etiqueta!=null) return etiqueta; //etiqueta ya existente, no hay que procesarla
+        }
+        for (contador=lista_etiquetas.size()-1;contador>=0;contador--) {
+            etiqueta=((Tipo_Etiqueta)lista_etiquetas.elementAt(contador));
+            if (etiqueta.puntero==puntero) return etiqueta; //si la encuentra, devuelve su referencia
+        }
+        etiqueta=new Tipo_Etiqueta(puntero); //si no la encuentra, la crea
+        lista_etiquetas.addElement(etiqueta); //y la añade
+        return etiqueta;
+    }
+    private Tipo_Etiqueta_NET crear_etiqueta_NET_vacia(Vector lista_etiquetas_NET,int puntero) {
+        //busca en la lista de etiquetas NET una que tenga el puntero dado. si no
+        //aparece, quiere decir que es un etiqueta nueva, y la crea.
+        int contador;
+        Tipo_Etiqueta_NET etiqueta;
+        for (contador=lista_etiquetas_NET.size()-1;contador>=0;contador--) {
+            etiqueta=((Tipo_Etiqueta_NET)lista_etiquetas_NET.elementAt(contador));
+            if (etiqueta.puntero==puntero) return etiqueta; //si la encuentra, devuelve su referencia
+        }
+        etiqueta=new Tipo_Etiqueta_NET(puntero); //si no la encuentra, la crea
+        lista_etiquetas_NET.addElement(etiqueta); //y la añade
+        return etiqueta;
+    }
+    private Tipo_Etiqueta_NET crear_POI_vacio(Vector lista_POIs,int puntero) {
+        //en pricipio sólo se procesará le etiqueta de los POI's, así que se puede usar el Tipo_Etiqueta_NET
+        //busca en la lista de POI's uno que tenga el puntero dado. si no
+        //aparece, quiere decir que es nuevo, y lo crea.
+        int contador;
+        Tipo_Etiqueta_NET etiqueta;
+        for (contador=lista_POIs.size()-1;contador>=0;contador--) {
+            etiqueta=((Tipo_Etiqueta_NET)lista_POIs.elementAt(contador));
+            if (etiqueta.puntero==puntero) return etiqueta; //si la encuentra, devuelve su referencia
+        }
+        etiqueta=new Tipo_Etiqueta_NET(puntero); //si no la encuentra, la crea
+        lista_POIs.addElement(etiqueta); //y la añade
+        return etiqueta;
+        
+    }
+    //estructuras de subarchivos y subestructuras
+    private class Tipo_Subarchivo { //clase interna para manejo de los subarchivos
+        int bloque_inicial;
+        int bloque_final;
+        int puntero_inicio;
+        int tamaño;
+        int tamaño_temporal; //puede ser útil en depuración
+        String nombre;
+    }
+    private class Tipo_TRE { //estructura básica de un subarchivo TRE, que contiene TRE1 y TRE2
+        float limite_norte;
+        float limite_este;
+        float limite_sur;
+        float limite_oeste;
+        int offset_niveles_TRE1;
+        int tamaño_niveles_TRE1;
+        int offset_subdivisiones_TRE2;
+        int tamaño_subdivisiones_TRE2;
+        int numero_subdivisiones;
+        Tipo_Niveles_TRE1 [] TRE1;
+        int indice_maximo_nivel_con_geometria; //puntero al nivel de menos detalle que tiene geometría
+        Vector TRE2;
+    }
+    private class Tipo_RGN { //punteros a las áreas de datos de cada subdivisión
+        int [] puntero_puntos; //posición absoluta dentro del archivo IMG
+        int [] final_puntos; //último byte del área
+        int [] puntero_puntos_indexados;
+        int [] final_puntos_indexados;
+        int [] puntero_polilineas;
+        int [] final_polilineas;
+        int [] puntero_poligonos;
+        int [] final_poligonos;
+        public Tipo_RGN(int numero_subdivisiones) { //el constructor reseva sitio para los arrays
+            puntero_puntos=new int[numero_subdivisiones];
+            final_puntos=new int[numero_subdivisiones];
+            puntero_puntos_indexados=new int[numero_subdivisiones];
+            final_puntos_indexados=new int[numero_subdivisiones];
+            puntero_polilineas=new int[numero_subdivisiones];
+            final_polilineas=new int[numero_subdivisiones];
+            puntero_poligonos=new int[numero_subdivisiones];
+            final_poligonos=new int[numero_subdivisiones];
+        }
+    }
+    private class Tipo_Niveles_TRE1{ //definición de los niveles de detalle y su precisión
+        byte zoom;
+        byte bits_coordenada;
+        int subdivisiones;
+        int puntero_primera_subdivision; //primera subdivisión del nivel
+    }
+    private class Tipo_Subdivisiones_TRE2 { //secciones que forman el mapa
+        int puntero_RGN;
+        byte tipo_objetos;
+        boolean objetos_puntos;
+        boolean objetos_puntos_indexados;
+        boolean objetos_polilineas;
+        boolean objetos_poligonos;
+        float limite_norte;
+        float limite_este;
+        float limite_sur;
+        float limite_oeste;
+        float centro_longitud;
+        float centro_latitud;
+        boolean flag_ultimo;
+        int subdivision_siguiente_nivel;
+    }
+    private class Tipo_LBL { //definición de la cabecera de un subarchivo LBL
+        int LBL1_etiquetas_offset;
+        int LBL1_etiquetas_tamaño;
+        int LBL1_etiquetas_multiplicador_offset;
+        byte formato_etiquetas;
+        int LBL2_paises_offset;
+        int LBL2_paises_tamaño;
+        int LBL2_paises_tamaño_registro;
+        int LBL3_regiones_offset;
+        int LBL3_regiones_tamaño;
+        int LBL3_regiones_tamaño_registro;
+        int LBL4_ciudades_offset;
+        int LBL4_ciudades_tamaño;
+        int LBL4_ciudades_tamaño_registro;
+        int LBL5_POI_indices_offset;
+        int LBL5_POI_indices_tamaño;
+        int LBL5_POI_indices_tamaño_registro;
+        int LBL6_POI_propiedades_Offset;
+        int LBL6_POI_propiedades_tamaño;
+        boolean LBL6_POI_propiedades_ZIP_Bit_Is_Phone_If_No_Phone_Bit;
+        byte LBL6_POI_propiedades_mascara_global;
+        int LBL7_POI_tipos_Offset;
+        int LBL7_POI_tipos_tamaño;
+        int LBL7_POI_tipos_tamaño_registro;
+        int LBL8_ZIP_Offset;
+        int LBL8_ZIP_tamaño;
+        int LBL8_ZIP_tamaño_registro;
+    }
+    
+    private class Tipo_NET { //definición de la cabecera de un subarchivo NET. sólo
+        int NET1_definiciones_carreteras_offset;
+        int NET1_definiciones_carreteras_tamaño;
+        int NET1_definiciones_carreteras_multiplicador_offset;
+        
+        
+    }
+    private class Tipo_Cache_Etiquetas { //almacén de las etiquetas ya procesadas. sólo disponible si cache_etiquetas_activado es true
+        private Vector etiquetas;
+        public Tipo_Cache_Etiquetas(){
+            etiquetas=new Vector(); //crea el almacén
+        }
+        public Tipo_Etiqueta leer_etiqueta(int puntero_etiqueta) {
+            //busca la etiqueta con el puntero dado, y si no está, devuelve null
+            int contador;
+            Tipo_Etiqueta etiqueta;
+            for (contador=etiquetas.size()-1;contador>=0;contador--) {
+                etiqueta=(Tipo_Etiqueta)etiquetas.elementAt(contador);
+                if (etiqueta.puntero==puntero_etiqueta) return etiqueta;
+            }
+            return null; //etiqueta no encontrada
+        }
+        public int añadir_etiqueta(Tipo_Etiqueta etiqueta) { //añade al cache una etiqueta ya procesada
+            if (leer_etiqueta(etiqueta.puntero)!=null ) { //si ya existía, hay algún problema en alguna parte
+                return 1; //error extraño
+            }
+            etiquetas.addElement(etiqueta);
+            return 0; //etiqueta añadida con éxito
+        }
+        
+    }
 }
